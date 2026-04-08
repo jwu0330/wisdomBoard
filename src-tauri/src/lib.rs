@@ -15,7 +15,17 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 const HOTKEY_SNIP: i32 = 1;
+// 使用較大的起始值避免重啟後 label 與上次重疊（#41）
 static PANEL_COUNT: AtomicI32 = AtomicI32::new(0);
+
+fn next_panel_id() -> String {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u32;
+    let seq = PANEL_COUNT.fetch_add(1, Ordering::SeqCst);
+    format!("panel-{}-{}", ts % 100000, seq)
+}
 
 /// 在背景執行緒中監聽全域快捷鍵
 fn start_hotkey_listener(app_handle: AppHandle) {
@@ -71,11 +81,23 @@ fn open_settings(app: AppHandle) -> Result<(), String> {
     }
 }
 
+/// 查詢目前存在的面板視窗列表（供設定視窗重開時同步狀態）(#44)
+#[tauri::command]
+fn list_panels(app: AppHandle) -> Vec<serde_json::Value> {
+    app.webview_windows()
+        .into_iter()
+        .filter(|(label, _)| label.starts_with("panel-"))
+        .map(|(label, win)| {
+            let title = win.title().unwrap_or_default();
+            serde_json::json!({ "label": label, "title": title })
+        })
+        .collect()
+}
+
 /// 建立一個 URL 面板（載入本地頁面後重導向到外部 URL）
 #[tauri::command]
 fn create_url_panel(app: AppHandle, url: String) -> Result<String, String> {
-    let id = PANEL_COUNT.fetch_add(1, Ordering::SeqCst);
-    let label = format!("panel-{}", id);
+    let label = next_panel_id();
 
     // 驗證 URL 格式
     let _parsed: url::Url = url.parse()
@@ -85,6 +107,9 @@ fn create_url_panel(app: AppHandle, url: String) -> Result<String, String> {
     let target_url = url.clone();
     let webview_url = tauri::WebviewUrl::App("src/webpanel.html".into());
     let navigated = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // 用 serde_json 安全序列化 URL，避免 JS 注入（#42）
+    let safe_url_js = serde_json::to_string(&target_url)
+        .unwrap_or_else(|_| format!("\"{}\"", target_url));
     let builder = tauri::WebviewWindowBuilder::new(&app, &label, webview_url)
         .title(format!("WisdomBoard - {}", url))
         .inner_size(800.0, 600.0)
@@ -92,16 +117,14 @@ fn create_url_panel(app: AppHandle, url: String) -> Result<String, String> {
         .always_on_top(false)    // 不強制置頂，避免擋住其他視窗
         .skip_taskbar(false)
         .transparent(false)
-        .on_navigation(|_url| true)  // 允許所有導航（包括重導向到外部 URL）
+        .on_navigation(|_url| true)
         .on_page_load({
             let navigated = navigated.clone();
             move |wv, payload| {
                 if let tauri::webview::PageLoadEvent::Finished = payload.event() {
-                    // 只在第一次載入時重導向
                     if !navigated.swap(true, Ordering::SeqCst) {
                         println!("[WisdomBoard] 頁面載入完成，重導向到: {}", target_url);
-                        let js = format!("window.location.href = '{}';",
-                            target_url.replace('\'', "\\'"));
+                        let js = format!("window.location.href = {};", safe_url_js);
                         let _ = wv.eval(&js);
                     }
                 }
@@ -130,12 +153,11 @@ fn create_url_panel(app: AppHandle, url: String) -> Result<String, String> {
 /// 建立一個空白面板
 #[tauri::command]
 fn create_panel(app: AppHandle) -> Result<String, String> {
-    let id = PANEL_COUNT.fetch_add(1, Ordering::SeqCst);
-    let label = format!("panel-{}", id);
+    let label = next_panel_id();
 
     let url = tauri::WebviewUrl::App("src/panel.html".into());
     let builder = tauri::WebviewWindowBuilder::new(&app, &label, url)
-        .title(format!("WisdomBoard Panel {}", id))
+        .title(format!("WisdomBoard Panel"))
         .inner_size(400.0, 300.0)
         .decorations(false)
         .always_on_top(true)
@@ -183,8 +205,15 @@ fn capture_screen_to_file() -> Result<String, String> {
         let bmp = CreateCompatibleBitmap(screen_dc, w, h);
         let old = SelectObject(mem_dc, bmp);
 
-        BitBlt(mem_dc, 0, 0, w, h, screen_dc, 0, 0, SRCCOPY)
-            .map_err(|e| format!("BitBlt 失敗: {e}"))?;
+        // BitBlt 可能失敗，但仍需清理 GDI 資源（#75）
+        let blt_result = BitBlt(mem_dc, 0, 0, w, h, screen_dc, 0, 0, SRCCOPY);
+        if let Err(e) = blt_result {
+            SelectObject(mem_dc, old);
+            let _ = DeleteObject(bmp);
+            let _ = DeleteDC(mem_dc);
+            ReleaseDC(HWND(0), screen_dc);
+            return Err(format!("BitBlt 失敗: {e}"));
+        }
 
         let row_bytes = ((w as u32 * 3 + 3) & !3) as usize;
         let img_size = row_bytes * h as usize;
@@ -211,7 +240,13 @@ fn capture_screen_to_file() -> Result<String, String> {
             &mut bi, DIB_RGB_COLORS,
         );
 
-        // 存到 temp 檔案（top-down BMP 在檔案中仍需正的 biHeight）
+        // 清理 GDI 資源（在寫檔前完成，避免檔案寫入失敗時洩漏）
+        SelectObject(mem_dc, old);
+        let _ = DeleteObject(bmp);
+        let _ = DeleteDC(mem_dc);
+        ReleaseDC(HWND(0), screen_dc);
+
+        // 寫入 BMP 暫存檔
         let path = std::env::temp_dir().join("wisdomboard_screenshot.bmp");
         let file_size = 54 + img_size;
         let mut f = std::fs::File::create(&path).map_err(|e| format!("建立檔案失敗: {e}"))?;
@@ -230,11 +265,6 @@ fn capture_screen_to_file() -> Result<String, String> {
         f.write_all(&[0u8; 16]).map_err(|e| format!("{e}"))?;
         f.write_all(&pixels).map_err(|e| format!("{e}"))?;
 
-        SelectObject(mem_dc, old);
-        let _ = DeleteObject(bmp);
-        let _ = DeleteDC(mem_dc);
-        ReleaseDC(HWND(0), screen_dc);
-
         let path_str = path.to_string_lossy().to_string();
         println!("[WisdomBoard] 螢幕截圖已存到: {} ({}x{}, {} bytes)", path_str, w, h, file_size);
         Ok(path_str)
@@ -250,10 +280,9 @@ fn get_screenshot() -> Result<String, String> {
 /// 開啟全螢幕框選 Overlay（截圖式，不依賴透明視窗）
 #[tauri::command]
 fn open_capture_overlay(app: AppHandle) -> Result<(), String> {
+    // 若 overlay 已存在，關閉重建（避免顯示舊截圖）(#77)
     if let Some(win) = app.get_webview_window("overlay") {
-        let _ = win.show();
-        let _ = win.set_focus();
-        return Ok(());
+        let _ = win.close();
     }
 
     // 先截圖（在開啟 overlay 之前，這樣截圖不會包含 overlay 本身）
@@ -262,6 +291,10 @@ fn open_capture_overlay(app: AppHandle) -> Result<(), String> {
     let (screen_w, screen_h) = unsafe {
         (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN))
     };
+
+    // 用 serde_json 安全序列化路徑，避免注入（#43）
+    let safe_path_js = serde_json::to_string(&screenshot_path)
+        .unwrap_or_else(|_| format!("\"{}\"", screenshot_path.replace('\\', "\\\\")));
 
     let url = tauri::WebviewUrl::App("src/overlay.html".into());
     let builder = tauri::WebviewWindowBuilder::new(&app, "overlay", url)
@@ -275,10 +308,7 @@ fn open_capture_overlay(app: AppHandle) -> Result<(), String> {
         .resizable(false)
         .on_page_load(move |wv, payload| {
             if let tauri::webview::PageLoadEvent::Finished = payload.event() {
-                let js = format!(
-                    "window.__SCREENSHOT_PATH__ = '{}';",
-                    screenshot_path.replace('\\', "\\\\"),
-                );
+                let js = format!("window.__SCREENSHOT_PATH__ = {};", safe_path_js);
                 let _ = wv.eval(&js);
             }
         });
@@ -311,12 +341,11 @@ fn capture_region(app: AppHandle, x: f64, y: f64, width: f64, height: f64) -> Re
 
     println!("[WisdomBoard] 擷取區域: ({}, {}) {}x{} (scale: {})", phys_x, phys_y, phys_w, phys_h, scale);
 
-    let id = PANEL_COUNT.fetch_add(1, Ordering::SeqCst);
-    let label = format!("panel-{}", id);
+    let label = next_panel_id();
 
     let url = tauri::WebviewUrl::App("src/panel.html".into());
     let builder = tauri::WebviewWindowBuilder::new(&app, &label, url)
-        .title(format!("WisdomBoard Capture {}", id))
+        .title(format!("WisdomBoard Capture"))
         .inner_size(phys_w as f64, phys_h as f64)
         .position(phys_x as f64, phys_y as f64)
         .decorations(false)
@@ -334,7 +363,8 @@ fn capture_region(app: AppHandle, x: f64, y: f64, width: f64, height: f64) -> Re
                 }
             });
 
-            let _ = app.emit("panel-created", serde_json::json!({
+            // 只通知 settings 視窗，不廣播到所有視窗（#70）
+            let _ = app.emit_to("settings", "panel-created", serde_json::json!({
                 "label": &label,
                 "type": "capture",
                 "x": phys_x, "y": phys_y, "width": phys_w, "height": phys_h
@@ -347,7 +377,7 @@ fn capture_region(app: AppHandle, x: f64, y: f64, width: f64, height: f64) -> Re
     }
 }
 
-/// 設定面板的縮放比例
+/// 設定面板的縮放比例（#49: 加入 overflow:hidden 避免空白區域）
 #[tauri::command]
 fn set_panel_zoom(app: AppHandle, label: String, zoom: f64) -> Result<(), String> {
     let window = app.get_webview_window(&label)
@@ -356,7 +386,8 @@ fn set_panel_zoom(app: AppHandle, label: String, zoom: f64) -> Result<(), String
         "document.documentElement.style.transform = 'scale({z})'; \
          document.documentElement.style.transformOrigin = 'top left'; \
          document.documentElement.style.width = '{w}%'; \
-         document.documentElement.style.height = '{h}%';",
+         document.documentElement.style.height = '{h}%'; \
+         document.documentElement.style.overflow = 'hidden';",
         z = zoom,
         w = 100.0 / zoom,
         h = 100.0 / zoom,
@@ -387,7 +418,6 @@ fn focus_panel(app: AppHandle, label: String) -> Result<(), String> {
 #[tauri::command]
 fn set_mode(app: AppHandle, mode: String) -> Result<(), String> {
     println!("[WisdomBoard] 切換模式: {}", mode);
-    // 遍歷所有面板視窗發送事件，避免廣播到 settings 等非面板視窗
     for (label, window) in app.webview_windows() {
         if label.starts_with("panel-") {
             let _ = window.emit("mode-changed", &mode);
@@ -475,7 +505,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![create_panel, create_url_panel, close_panel, focus_panel, set_mode, set_panel_mode, set_panel_zoom, open_capture_overlay, capture_region, get_screenshot, run_debug_tests])
+        .invoke_handler(tauri::generate_handler![create_panel, create_url_panel, close_panel, focus_panel, set_mode, set_panel_mode, set_panel_zoom, open_capture_overlay, capture_region, get_screenshot, run_debug_tests, list_panels])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app, event| {

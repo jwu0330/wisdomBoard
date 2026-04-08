@@ -41,11 +41,6 @@
         font-size: 11px; font-family: monospace;
         display: none; pointer-events: none; z-index: 20;
       }
-      #dbg {
-        position: fixed; bottom: 10px; left: 10px;
-        color: #ff0; font-size: 11px; z-index: 30;
-        text-shadow: 0 1px 2px #000;
-      }
     </style>
   </head>
   <body>
@@ -53,87 +48,57 @@
     <div id="hint">正在載入螢幕截圖...<small>按 ESC 取消</small></div>
     <div id="sel"></div>
     <div id="sz"></div>
-    <div id="dbg"></div>
     <script>
       (function() {
         var bg = document.getElementById("bg");
         var hint = document.getElementById("hint");
         var sel = document.getElementById("sel");
         var sz = document.getElementById("sz");
-        var dbg = document.getElementById("dbg");
         var dragging = false, sx = 0, sy = 0;
         var ready = false;
 
-        function log(msg) {
-          dbg.textContent = msg;
-          console.log("[overlay] " + msg);
-        }
-
-        // 等待 Rust 注入 __SCREENSHOT_PATH__
+        // 等待 Rust 注入 __SCREENSHOT_PATH__，最多等 10 秒（#58）
+        var waitCount = 0;
         function waitForPath() {
           if (window.__SCREENSHOT_PATH__) {
             loadScreenshot(window.__SCREENSHOT_PATH__);
-          } else {
+          } else if (waitCount++ < 100) {
             setTimeout(waitForPath, 100);
+          } else {
+            hint.innerHTML = "截圖載入超時<small>按 ESC 取消</small>";
           }
         }
 
         function loadScreenshot(filePath) {
-          log("截圖路徑: " + filePath);
-          // 使用 Tauri 的 convertFileSrc 將本地路徑轉為 webview 可存取的 URL
           if (window.__TAURI__ && window.__TAURI__.core.convertFileSrc) {
             var assetUrl = window.__TAURI__.core.convertFileSrc(filePath);
-            log("asset URL: " + assetUrl);
             var img = new Image();
             img.onload = function() {
               bg.style.backgroundImage = "url(" + assetUrl + ")";
               hint.innerHTML = "拖拉滑鼠框選要擷取的區域<small>按 ESC 取消</small>";
               ready = true;
-              log("截圖載入成功 (" + img.width + "x" + img.height + ")");
             };
             img.onerror = function() {
-              log("convertFileSrc 載入失敗，嘗試 file:// 協議");
               tryFileProtocol(filePath);
             };
             img.src = assetUrl;
           } else {
-            log("convertFileSrc 不可用，嘗試 file:// 協議");
             tryFileProtocol(filePath);
           }
         }
 
         function tryFileProtocol(filePath) {
           var fileUrl = "file:///" + filePath.replace(/\\/g, "/");
-          log("file URL: " + fileUrl);
           var img = new Image();
           img.onload = function() {
             bg.style.backgroundImage = "url(" + fileUrl + ")";
             hint.innerHTML = "拖拉滑鼠框選要擷取的區域<small>按 ESC 取消</small>";
             ready = true;
-            log("file:// 載入成功");
           };
           img.onerror = function() {
-            log("file:// 也失敗，嘗試直接用 invoke 讀取");
-            tryInvokeRead(filePath);
+            hint.innerHTML = "截圖載入失敗<small>按 ESC 取消</small>";
           };
           img.src = fileUrl;
-        }
-
-        function tryInvokeRead(filePath) {
-          // 最後手段：用 fetch + blob
-          fetch("file:///" + filePath.replace(/\\/g, "/"))
-            .then(function(r) { return r.blob(); })
-            .then(function(blob) {
-              var url = URL.createObjectURL(blob);
-              bg.style.backgroundImage = "url(" + url + ")";
-              hint.innerHTML = "拖拉滑鼠框選要擷取的區域<small>按 ESC 取消</small>";
-              ready = true;
-              log("fetch blob 載入成功");
-            })
-            .catch(function(err) {
-              hint.innerHTML = "截圖載入失敗<small>按 ESC 取消</small>";
-              log("全部方式失敗: " + err);
-            });
         }
 
         waitForPath();

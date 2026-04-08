@@ -5,55 +5,17 @@
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
     body { width:100vw; height:100vh; overflow:hidden; background:#fff; }
-    iframe { width:100%; height:100%; border:none; }
     #status {
       display:flex; align-items:center; justify-content:center;
       width:100%; height:100%;
       color:#999; font-family:"Segoe UI","Microsoft JhengHei",sans-serif;
       font-size:13px; text-align:center;
     }
-    #status.hidden { display:none; }
   </style>
 </head>
 <body>
   <div id="status">載入中...</div>
-  <iframe id="frame" style="display:none"></iframe>
-  <script>
-    var frame = document.getElementById("frame");
-    var status = document.getElementById("status");
-
-    // URL 由 Rust eval 注入：設定 frame.src
-    // 也支援 query string 方式（備用）
-    var params = new URLSearchParams(window.location.search);
-    var url = params.get("url");
-    if (url) {
-      loadUrl(url);
-    }
-
-    // 監聽 Rust eval 設定的 src
-    var observer = new MutationObserver(function() {
-      if (frame.src && frame.src !== "about:blank" && frame.src !== window.location.href) {
-        status.className = "hidden";
-        frame.style.display = "block";
-        observer.disconnect();
-      }
-    });
-    observer.observe(frame, { attributes: true, attributeFilter: ["src"] });
-
-    frame.onload = function() {
-      status.className = "hidden";
-      frame.style.display = "block";
-    };
-
-    frame.onerror = function() {
-      status.textContent = "無法載入頁面";
-    };
-
-    function loadUrl(u) {
-      frame.src = u;
-      status.className = "hidden";
-      frame.style.display = "block";
-    }
-  </script>
+  <!-- 此頁面會被 create_url_panel 的 on_page_load JS 重導向到外部 URL -->
+  <!-- window.location.href 會完全取代此頁面，以下不會被執行 -->
 </body>
 </html>

@@ -68,8 +68,9 @@
     <div class="top">
       <h1>WISDOMBOARD</h1>
       <div class="acts">
+        <button id="btn-unlock-all" title="解鎖全部">解鎖</button>
         <button id="btn-lock-all" title="鎖定全部">鎖定</button>
-        <button id="btn-edit-all" title="編輯全部">編輯</button>
+        <button id="btn-resize-all" title="調整全部">調整</button>
         <button id="btn-close-all" title="關閉全部">全部關閉</button>
       </div>
     </div>
@@ -115,6 +116,13 @@
       const urlErr = document.getElementById("url-err");
       const urlOk = document.getElementById("url-ok");
 
+      // HTML entity escape 防止 XSS（#46）
+      function esc(s) {
+        var d = document.createElement("div");
+        d.textContent = s;
+        return d.innerHTML;
+      }
+
       document.getElementById("btn-add").onclick = () => { dlg.classList.add("show"); urlArea.classList.remove("show"); urlErr.classList.remove("show"); };
       document.getElementById("dlg-x").onclick = closeDlg;
       dlg.onclick = (e) => { if (e.target === dlg) closeDlg(); };
@@ -138,7 +146,6 @@
         } catch (e) { urlErr.textContent = "建立失敗：" + e; urlErr.classList.add("show"); }
       }
 
-      // 新增空白面板
       document.getElementById("opt-cap").onclick = async () => {
         closeDlg();
         try {
@@ -146,8 +153,10 @@
         } catch (e) { alert("建立失敗：" + e); }
       };
 
+      // (#52) 解鎖全部 + (#53) 按鈕用詞修正
+      document.getElementById("btn-unlock-all").onclick = async () => { panels.forEach(p => p.mode = "view"); await invoke("set_mode", { mode: "view" }); render(); };
       document.getElementById("btn-lock-all").onclick = async () => { panels.forEach(p => p.mode = "locked"); await invoke("set_mode", { mode: "locked" }); render(); };
-      document.getElementById("btn-edit-all").onclick = async () => { panels.forEach(p => p.mode = "resize"); await invoke("set_mode", { mode: "resize" }); render(); };
+      document.getElementById("btn-resize-all").onclick = async () => { panels.forEach(p => p.mode = "resize"); await invoke("set_mode", { mode: "resize" }); render(); };
       document.getElementById("btn-close-all").onclick = async () => {
         for (const p of [...panels]) { try { await invoke("close_panel", { label: p.label }); } catch {} }
         panels = []; render();
@@ -156,6 +165,7 @@
       function render() {
         document.getElementById("ct").textContent = "面板：" + panels.length;
         if (!panels.length) { listEl.innerHTML = '<div class="empty">尚未建立面板</div>'; return; }
+        // (#46) 使用 esc() 對 URL 做 HTML entity escape
         listEl.innerHTML = panels.map((p, i) => `
           <div class="card">
             <div class="card-top">
@@ -163,7 +173,7 @@
               <button class="x" onclick="doClose(${i})">&#x2715;</button>
             </div>
             <div class="card-body">
-              ${p.url ? '<div class="card-url">'+p.url+'</div>' : ''}
+              ${p.url ? '<div class="card-url">'+esc(p.url)+'</div>' : ''}
               <div class="pills">
                 <button class="pill ${p.mode==='view'?'on':''}" onclick="doMode(${i},'view')">觀看</button>
                 <button class="pill ${p.mode==='interact'?'on':''}" onclick="doMode(${i},'interact')">操作</button>
@@ -172,7 +182,7 @@
               </div>
               <div class="zoom-row">
                 <span>縮放</span>
-                <input type="range" min="10" max="100" value="${Math.round(p.zoom*100)}" oninput="doZoom(${i},this.value)" />
+                <input type="range" min="10" max="200" value="${Math.round(p.zoom*100)}" oninput="doZoom(${i},this.value)" />
                 <span class="val" id="zv-${i}">${Math.round(p.zoom*100)}%</span>
               </div>
             </div>
@@ -192,6 +202,22 @@
         await getCurrentWindow().show();
         await getCurrentWindow().setFocus();
       });
+
+      // 設定視窗開啟時，查詢後端已有面板列表（#44）
+      async function syncPanels() {
+        try {
+          const existing = await invoke("list_panels");
+          for (const p of existing) {
+            if (!panels.find(x => x.label === p.label)) {
+              panels.push({ label: p.label, url: null, mode: "view", zoom: 1.0 });
+            }
+          }
+          render();
+        } catch (e) {
+          console.warn("[settings] list_panels 失敗:", e);
+        }
+      }
+      syncPanels();
 
       render();
 
