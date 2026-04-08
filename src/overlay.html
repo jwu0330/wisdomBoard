@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-TW">
+  <head>
+    <meta charset="UTF-8" />
+    <title>框選區域</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 100vw; height: 100vh; overflow: hidden; }
+      body {
+        background: #0a0a14;
+        opacity: 0.75;
+        cursor: crosshair;
+        user-select: none;
+        font-family: "Segoe UI", "Microsoft JhengHei", sans-serif;
+      }
+      #hint {
+        position: fixed; top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        color: #fff; font-size: 20px;
+        text-align: center; pointer-events: none;
+      }
+      #hint small { display: block; font-size: 13px; opacity: 0.6; margin-top: 8px; }
+      #sel {
+        position: fixed;
+        border: 2px solid #89b4fa;
+        background: rgba(137,180,250,0.2);
+        display: none;
+        pointer-events: none;
+        z-index: 10;
+      }
+      #sz {
+        position: fixed;
+        background: #000; color: #89b4fa;
+        padding: 3px 8px; border-radius: 3px;
+        font-size: 11px; font-family: monospace;
+        display: none; pointer-events: none; z-index: 20;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hint">拖拉滑鼠框選要擷取的區域<small>按 ESC 取消</small></div>
+    <div id="sel"></div>
+    <div id="sz"></div>
+    <script>
+      // 不使用 module，直接用全域 script 避免 Vite 轉換問題
+      (function() {
+        var hint = document.getElementById("hint");
+        var sel = document.getElementById("sel");
+        var sz = document.getElementById("sz");
+        var dragging = false, sx = 0, sy = 0;
+
+        document.addEventListener("keydown", function(e) {
+          if (e.key === "Escape") {
+            if (window.__TAURI__) {
+              window.__TAURI__.window.getCurrentWindow().close();
+            } else {
+              window.close();
+            }
+          }
+        });
+
+        document.addEventListener("mousedown", function(e) {
+          dragging = true;
+          sx = e.clientX; sy = e.clientY;
+          hint.style.display = "none";
+          sel.style.display = "block";
+          sz.style.display = "block";
+          upd(e.clientX, e.clientY);
+        });
+
+        document.addEventListener("mousemove", function(e) {
+          if (dragging) upd(e.clientX, e.clientY);
+        });
+
+        document.addEventListener("mouseup", function(e) {
+          if (!dragging) return;
+          dragging = false;
+          var r = rect(e.clientX, e.clientY);
+
+          if (r.w < 50 || r.h < 30) {
+            hint.style.display = "block";
+            hint.innerHTML = "範圍太小，請重新拖拉<small>按 ESC 取消</small>";
+            sel.style.display = "none";
+            sz.style.display = "none";
+            return;
+          }
+
+          // 呼叫 Rust 擷取
+          if (window.__TAURI__) {
+            window.__TAURI__.core.invoke("capture_region", {
+              x: r.x, y: r.y, width: r.w, height: r.h
+            }).then(function() {
+              window.__TAURI__.window.getCurrentWindow().close();
+            }).catch(function(err) {
+              hint.style.display = "block";
+              hint.innerHTML = "擷取失敗：" + err + "<small>按 ESC 取消</small>";
+              sel.style.display = "none";
+            });
+          }
+        });
+
+        function rect(cx, cy) {
+          return {
+            x: Math.min(sx, cx), y: Math.min(sy, cy),
+            w: Math.abs(cx - sx), h: Math.abs(cy - sy)
+          };
+        }
+
+        function upd(cx, cy) {
+          var r = rect(cx, cy);
+          sel.style.left = r.x + "px";
+          sel.style.top = r.y + "px";
+          sel.style.width = r.w + "px";
+          sel.style.height = r.h + "px";
+          sz.style.left = (r.x + r.w + 6) + "px";
+          sz.style.top = (r.y + r.h + 6) + "px";
+          sz.textContent = r.w + " x " + r.h;
+        }
+      })();
+    </script>
+  </body>
+</html>

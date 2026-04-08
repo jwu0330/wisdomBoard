@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-TW">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Panel</title>
+    <style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      body { width:100vw; height:100vh; background:#fff; color:#111; font-family:"Segoe UI","Microsoft JhengHei",sans-serif; overflow:hidden; display:flex; flex-direction:column; border:1px solid #ddd; }
+
+      #drag { height:4px; background:#eee; cursor:move; -webkit-app-region:drag; flex-shrink:0; }
+      body.locked #drag { cursor:default; -webkit-app-region:no-drag; }
+
+      #content { flex:1; display:flex; align-items:center; justify-content:center; }
+      #content .ph { text-align:center; color:#ccc; font-size:12px; }
+
+      #bar {
+        position:absolute; bottom:6px; left:50%; transform:translateX(-50%);
+        display:flex; gap:1px; background:#fff; border:1px solid #ddd;
+        padding:2px; opacity:0; transition:opacity 0.15s; pointer-events:none;
+      }
+      body:hover #bar { opacity:1; pointer-events:auto; }
+
+      #bar button { width:28px; height:22px; border:1px solid #eee; background:#fff; color:#666; font-size:10px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+      #bar button:hover { background:#f5f5f5; color:#111; }
+      #bar button.on { background:#111; color:#fff; border-color:#111; }
+
+      .resize-r { position:absolute; top:0; right:0; width:4px; height:100%; cursor:ew-resize; display:none; }
+      .resize-b { position:absolute; bottom:0; left:0; width:100%; height:4px; cursor:ns-resize; display:none; }
+      .resize-c { position:absolute; bottom:0; right:0; width:10px; height:10px; cursor:nwse-resize; display:none; }
+      body.resizing .resize-r, body.resizing .resize-b, body.resizing .resize-c { display:block; }
+    </style>
+  </head>
+  <body>
+    <div id="drag"></div>
+    <div id="content"><div class="ph">面板<br><span style="font-size:10px;color:#ddd;">拖拉頂部移動 | 滑鼠懸停顯示工具列</span></div></div>
+    <div class="resize-r" id="rr"></div>
+    <div class="resize-b" id="rb"></div>
+    <div class="resize-c" id="rc"></div>
+
+    <div id="bar">
+      <button class="on" data-m="view" title="觀看">V</button>
+      <button data-m="interact" title="操作">I</button>
+      <button data-m="resize" title="調整">R</button>
+      <button data-m="locked" title="鎖定">L</button>
+      <button id="btn-x" title="關閉" style="color:#c00;">X</button>
+    </div>
+
+    <script>
+    (function(){
+      var mode = "view";
+      var locked = false;
+      var win = window.__TAURI__ ? window.__TAURI__.window.getCurrentWindow() : null;
+
+      // 模式按鈕
+      document.querySelectorAll("#bar button[data-m]").forEach(function(btn){
+        btn.addEventListener("click", function(){
+          if (locked && btn.dataset.m !== "locked") return;
+          setMode(btn.dataset.m);
+        });
+      });
+
+      document.getElementById("btn-x").addEventListener("click", function(){
+        if (locked) return;
+        if (win) win.close();
+      });
+
+      function setMode(m) {
+        if (m === "locked") {
+          locked = !locked;
+          m = locked ? "locked" : "view";
+        } else {
+          locked = false;
+        }
+        mode = m;
+        document.body.className = m === "resize" ? "resizing" : (m === "locked" ? "locked" : "");
+        if (win) win.setResizable(m === "resize");
+
+        document.querySelectorAll("#bar button[data-m]").forEach(function(b){
+          b.classList.toggle("on", b.dataset.m === m);
+        });
+      }
+
+      // 調整大小
+      var resizing = false, rtype = "", rsx, rsy, rsw, rsh;
+      ["rr","rb","rc"].forEach(function(id){
+        document.getElementById(id).addEventListener("mousedown", function(e){
+          if (mode !== "resize" || !win) return;
+          resizing = true;
+          rtype = id;
+          rsx = e.screenX; rsy = e.screenY;
+          win.innerSize().then(function(s){ rsw=s.width; rsh=s.height; });
+          e.preventDefault();
+        });
+      });
+      document.addEventListener("mousemove", function(e){
+        if (!resizing || !win) return;
+        var dx=e.screenX-rsx, dy=e.screenY-rsy;
+        var nw=rsw, nh=rsh;
+        if (rtype==="rr"||rtype==="rc") nw=Math.max(150,rsw+dx);
+        if (rtype==="rb"||rtype==="rc") nh=Math.max(100,rsh+dy);
+        win.setSize(new window.__TAURI__.window.LogicalSize(nw,nh));
+      });
+      document.addEventListener("mouseup", function(){ resizing=false; });
+
+      // 監聽模式切換事件
+      if (window.__TAURI__) {
+        window.__TAURI__.event.listen("mode-changed", function(ev){
+          setMode(ev.payload);
+        });
+      }
+    })();
+    </script>
+  </body>
+</html>

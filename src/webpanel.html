@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { width:100vw; height:100vh; overflow:hidden; background:#fff; }
+    iframe { width:100%; height:100%; border:none; }
+    #err { display:none; color:#f38ba8; font-family:"Segoe UI","Microsoft JhengHei",sans-serif;
+      font-size:13px; text-align:center; padding:40px 20px; }
+    #err b { display:block; font-size:16px; margin-bottom:8px; color:#cdd6f4; }
+    #err .url { font-size:11px; opacity:0.4; word-break:break-all; margin-top:12px; }
+  </style>
+</head>
+<body>
+  <iframe id="frame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
+  <div id="err">
+    <b>無法載入頁面</b>
+    <span id="err-msg"></span>
+    <div class="url" id="err-url"></div>
+  </div>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const url = params.get("url");
+    const frame = document.getElementById("frame");
+    const errEl = document.getElementById("err");
+
+    if (url) {
+      frame.src = url;
+      // 如果 iframe 載入失敗（X-Frame-Options 等），3 秒後改用直接導航
+      let loaded = false;
+      frame.onload = () => { loaded = true; };
+      setTimeout(() => {
+        if (!loaded) {
+          // iframe 可能被封鎖，改用直接導航
+          window.location.href = url;
+        }
+      }, 3000);
+    } else {
+      frame.style.display = "none";
+      errEl.style.display = "block";
+      document.getElementById("err-msg").textContent = "未提供網址";
+    }
+  </script>
+</body>
+</html>

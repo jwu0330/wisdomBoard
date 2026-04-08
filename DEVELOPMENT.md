@@ -334,7 +334,62 @@ gh run download -n WisdomBoard-Portable
 
 ## 10. 踩坑紀錄與經驗教訓
 
-### 10.1 windows crate API 回傳型態不一致
+### 10.0 目前開發困境與待解決問題（2026-04-08）
+
+#### 困境 1：全螢幕透明 Overlay 無法實現
+**目標：** 框選螢幕區域時需要一個半透明全螢幕覆蓋層（像 Windows 截圖工具）。
+**問題：**
+- `transparent: true` + `fullscreen: true` → Tauri 在 Windows 上直接閃退
+- `transparent: true` + `maximized: true` → 同樣閃退
+- `transparent: false` + 任何背景色 → 變成不透明視窗，完全遮住桌面無法看到底下內容
+- CSS `rgba()` 半透明背景在不透明視窗上無效，仍然是全白
+
+**根本原因：** Tauri v2 + WebView2 在 Windows 上的透明視窗支援有限。WebView2 本身需要特殊設定才能支援透明背景。
+
+**替代方案待研究：**
+1. 使用 Windows API 直接截取螢幕截圖，顯示在不透明視窗上讓使用者框選（模擬透明效果）
+2. 使用 `ICoreWebView2Controller::put_DefaultBackgroundColor` 設定 WebView2 透明背景
+3. 放棄 Overlay 方式，改用其他互動模式（如：在設定視窗中選擇目標視窗+區域）
+
+#### 困境 2：URL 面板載入空白
+**目標：** 在面板視窗中載入外部網頁（如 google.com）。
+**問題：**
+- `WebviewUrl::External(url)` → 動態建立的視窗載入外部 URL 顯示空白
+- 本地 HTML + iframe → 部分網站封鎖 iframe（X-Frame-Options）
+- 本地 HTML + `window.location.href` → 跳轉後頁面也是空白
+
+**可能原因：**
+- 動態建立的 WebView 視窗可能缺少必要的權限或安全設定
+- capabilities 中的 `"windows": ["*"]` 通配符可能未正確匹配
+- WebView2 的安全策略可能阻擋外部 URL 載入
+
+**待驗證：**
+- 檢查 Tauri v2 動態視窗的 CSP 設定
+- 嘗試在 tauri.conf.json 中預定義面板視窗
+- 檢查 WebView2 DevTools 的 Console 錯誤訊息
+
+#### 困境 3：UI 設計方向
+**使用者需求：** 極簡風格 — 白底/黑字、直角方框、無多餘色彩
+**目前狀態：** 使用深色主題（#1e1e2e 背景）+ 圓角 + 多色按鈕
+**待修正：** 全部改為白底黑字極簡風格
+
+### 10.1 SetParent 後視窗消失（Windows 11）
+
+**問題：** 呼叫 `SetParent` 將視窗掛載到 WorkerW 後，視窗在 Windows 11 上不可見。
+
+**根本原因：** Windows 11 的 `SetParent` 會將子視窗的尺寸重置或隱藏，需要顯式重新顯示和定位。
+
+**解決方式：** 在 `SetParent` 之後立即呼叫：
+```rust
+let screen_w = GetSystemMetrics(SM_CXSCREEN);
+let screen_h = GetSystemMetrics(SM_CYSCREEN);
+MoveWindow(hwnd, 0, 0, screen_w, screen_h, BOOL(1));  // 填滿螢幕
+ShowWindow(hwnd, SW_SHOW);                              // 顯式顯示
+```
+
+**教訓：** 任何使用 `SetParent` 重新掛載視窗的操作，之後都必須重新設定位置、大小和可見性。
+
+### 10.2 windows crate API 回傳型態不一致
 
 **問題：** `windows` crate 0.52 中，不同 Win32 函式的回傳型態不統一：
 

@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-TW">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WisdomBoard</title>
+    <style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      body { font-family:"Segoe UI","Microsoft JhengHei",sans-serif; background:#fff; color:#111; font-size:13px; min-height:100vh; }
+
+      .top { display:flex; align-items:center; justify-content:space-between; padding:10px 16px; border-bottom:1px solid #ddd; }
+      .top h1 { font-size:14px; font-weight:700; letter-spacing:0.5px; }
+      .top .acts { display:flex; gap:2px; }
+      .top .acts button { background:none; border:1px solid #ddd; color:#666; font-size:11px; cursor:pointer; padding:4px 10px; }
+      .top .acts button:hover { background:#f5f5f5; color:#111; }
+
+      .body { padding:12px 16px; }
+
+      .add-btn { width:100%; padding:14px; border:1px dashed #ccc; background:none; color:#999; font-size:12px; cursor:pointer; font-family:inherit; margin-bottom:10px; }
+      .add-btn:hover { border-color:#111; color:#111; }
+
+      .card { border:1px solid #ddd; margin-bottom:8px; }
+      .card-top { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid #eee; background:#fafafa; }
+      .card-top .name { font-weight:600; font-size:12px; }
+      .card-top .tag { font-size:9px; padding:1px 6px; border:1px solid #ccc; margin-left:6px; }
+      .card-top .x { background:none; border:none; color:#999; cursor:pointer; font-size:12px; }
+      .card-top .x:hover { color:#e00; }
+      .card-body { padding:8px 12px; }
+      .card-url { font-size:10px; color:#999; word-break:break-all; margin-bottom:6px; }
+      .pills { display:flex; gap:2px; margin-bottom:6px; }
+      .pill { padding:3px 10px; border:1px solid #ddd; font-size:10px; cursor:pointer; background:#fff; color:#666; font-family:inherit; }
+      .pill:hover { border-color:#111; color:#111; }
+      .pill.on { background:#111; color:#fff; border-color:#111; }
+      .zoom-row { display:flex; align-items:center; gap:6px; }
+      .zoom-row span { font-size:10px; color:#999; }
+      .zoom-row input { flex:1; }
+      .zoom-row .val { font-size:10px; min-width:30px; text-align:right; color:#666; }
+
+      .empty { text-align:center; padding:30px; color:#ccc; font-size:12px; }
+
+      /* 對話框 */
+      .ov { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.3); z-index:100; align-items:center; justify-content:center; }
+      .ov.show { display:flex; }
+      .dlg { background:#fff; border:1px solid #ddd; width:320px; }
+      .dlg-h { padding:10px 14px; border-bottom:1px solid #eee; font-size:13px; font-weight:600; display:flex; justify-content:space-between; align-items:center; }
+      .dlg-h button { background:none; border:none; color:#999; cursor:pointer; }
+      .dlg-b { padding:14px; }
+      .opt { padding:10px; border:1px solid #eee; margin-bottom:6px; cursor:pointer; }
+      .opt:hover { border-color:#111; }
+      .opt b { font-size:12px; display:block; margin-bottom:2px; }
+      .opt small { font-size:10px; color:#999; }
+      .url-area { display:none; margin-top:10px; }
+      .url-area.show { display:block; }
+      .url-area input { width:100%; padding:8px 10px; border:1px solid #ddd; font-size:12px; font-family:inherit; outline:none; }
+      .url-area input:focus { border-color:#111; }
+      .url-area .row { display:flex; gap:6px; margin-top:8px; }
+      .btn { padding:6px 14px; border:1px solid #ddd; font-size:11px; cursor:pointer; font-family:inherit; background:#fff; }
+      .btn-p { background:#111; color:#fff; border-color:#111; }
+      .btn-p:hover { background:#333; }
+      .btn-p:disabled { opacity:0.3; }
+      .err { display:none; margin-top:6px; padding:6px 10px; border:1px solid #e00; font-size:11px; color:#e00; }
+      .err.show { display:block; }
+
+      .foot { position:fixed; bottom:0; left:0; right:0; padding:5px 16px; border-top:1px solid #eee; font-size:10px; color:#999; display:flex; justify-content:space-between; background:#fff; }
+    </style>
+  </head>
+  <body>
+    <div class="top">
+      <h1>WISDOMBOARD</h1>
+      <div class="acts">
+        <button id="btn-lock-all" title="鎖定全部">鎖定</button>
+        <button id="btn-edit-all" title="編輯全部">編輯</button>
+        <button id="btn-close-all" title="關閉全部">全部關閉</button>
+      </div>
+    </div>
+
+    <div class="body">
+      <button class="add-btn" id="btn-add">+ 新增面板</button>
+      <div id="list"><div class="empty">尚未建立面板</div></div>
+    </div>
+
+    <div class="ov" id="dlg">
+      <div class="dlg">
+        <div class="dlg-h"><span>新增面板</span><button id="dlg-x">&#x2715;</button></div>
+        <div class="dlg-b">
+          <div class="opt" id="opt-url"><b>貼上網址</b><small>輸入 URL 顯示在面板中</small></div>
+          <div class="opt" id="opt-cap"><b>新增空白面板</b><small>建立可自由調整位置和大小的面板</small></div>
+          <div class="url-area" id="url-area">
+            <input id="url-in" placeholder="https://example.com" />
+            <div class="err" id="url-err"></div>
+            <div class="row">
+              <button class="btn btn-p" id="url-ok" disabled>建立</button>
+              <button class="btn" id="url-no">取消</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="foot">
+      <span id="st">就緒</span>
+      <span id="ct">面板：0</span>
+    </div>
+
+    <script type="module">
+      const { invoke } = window.__TAURI__.core;
+      const { listen } = window.__TAURI__.event;
+      const { getCurrentWindow } = window.__TAURI__.window;
+
+      let panels = [];
+      const listEl = document.getElementById("list");
+      const dlg = document.getElementById("dlg");
+      const urlArea = document.getElementById("url-area");
+      const urlIn = document.getElementById("url-in");
+      const urlErr = document.getElementById("url-err");
+      const urlOk = document.getElementById("url-ok");
+
+      document.getElementById("btn-add").onclick = () => { dlg.classList.add("show"); urlArea.classList.remove("show"); urlErr.classList.remove("show"); };
+      document.getElementById("dlg-x").onclick = closeDlg;
+      dlg.onclick = (e) => { if (e.target === dlg) closeDlg(); };
+      function closeDlg() { dlg.classList.remove("show"); urlArea.classList.remove("show"); urlErr.classList.remove("show"); urlIn.value = ""; }
+
+      document.getElementById("opt-url").onclick = () => { urlArea.classList.add("show"); urlIn.focus(); };
+      urlIn.oninput = () => { urlOk.disabled = !urlIn.value.trim(); urlErr.classList.remove("show"); };
+      urlOk.onclick = doCreateUrl;
+      urlIn.onkeydown = (e) => { if (e.key === "Enter" && urlIn.value.trim()) doCreateUrl(); };
+      document.getElementById("url-no").onclick = () => { urlArea.classList.remove("show"); urlIn.value = ""; };
+
+      async function doCreateUrl() {
+        let url = urlIn.value.trim();
+        if (!url) return;
+        if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+        try { new URL(url); } catch { urlErr.textContent = "網址格式不正確"; urlErr.classList.add("show"); return; }
+        try {
+          const label = await invoke("create_url_panel", { url });
+          panels.push({ label, url, mode: "view", zoom: 1.0 });
+          render(); closeDlg();
+        } catch (e) { urlErr.textContent = "建立失敗：" + e; urlErr.classList.add("show"); }
+      }
+
+      // 新增空白面板
+      document.getElementById("opt-cap").onclick = async () => {
+        closeDlg();
+        try {
+          await invoke("open_capture_overlay");
+        } catch (e) { alert("建立失敗：" + e); }
+      };
+
+      document.getElementById("btn-lock-all").onclick = async () => { panels.forEach(p => p.mode = "locked"); await invoke("set_mode", { mode: "locked" }); render(); };
+      document.getElementById("btn-edit-all").onclick = async () => { panels.forEach(p => p.mode = "resize"); await invoke("set_mode", { mode: "resize" }); render(); };
+      document.getElementById("btn-close-all").onclick = async () => {
+        for (const p of [...panels]) { try { await invoke("close_panel", { label: p.label }); } catch {} }
+        panels = []; render();
+      };
+
+      function render() {
+        document.getElementById("ct").textContent = "面板：" + panels.length;
+        if (!panels.length) { listEl.innerHTML = '<div class="empty">尚未建立面板</div>'; return; }
+        listEl.innerHTML = panels.map((p, i) => `
+          <div class="card">
+            <div class="card-top">
+              <span><span class="name">面板 ${i+1}</span><span class="tag">${p.url?'URL':'面板'}</span></span>
+              <button class="x" onclick="doClose(${i})">&#x2715;</button>
+            </div>
+            <div class="card-body">
+              ${p.url ? '<div class="card-url">'+p.url+'</div>' : ''}
+              <div class="pills">
+                <button class="pill ${p.mode==='view'?'on':''}" onclick="doMode(${i},'view')">觀看</button>
+                <button class="pill ${p.mode==='interact'?'on':''}" onclick="doMode(${i},'interact')">操作</button>
+                <button class="pill ${p.mode==='resize'?'on':''}" onclick="doMode(${i},'resize')">調整</button>
+                <button class="pill ${p.mode==='locked'?'on':''}" onclick="doMode(${i},'locked')">鎖定</button>
+              </div>
+              <div class="zoom-row">
+                <span>縮放</span>
+                <input type="range" min="10" max="100" value="${Math.round(p.zoom*100)}" oninput="doZoom(${i},this.value)" />
+                <span class="val" id="zv-${i}">${Math.round(p.zoom*100)}%</span>
+              </div>
+            </div>
+          </div>
+        `).join("");
+      }
+
+      window.doClose = async (i) => { try { await invoke("close_panel",{label:panels[i].label}); } catch {} panels.splice(i,1); render(); };
+      window.doMode = async (i,m) => { panels[i].mode=m; try{await invoke("set_panel_mode",{label:panels[i].label,mode:m});}catch{} render(); };
+      window.doZoom = async (i,v) => { const z=parseInt(v)/100; panels[i].zoom=z; const el=document.getElementById("zv-"+i); if(el)el.textContent=v+"%"; try{await invoke("set_panel_zoom",{label:panels[i].label,zoom:z});}catch{} };
+
+      listen("panel-closed", (e) => { panels=panels.filter(p=>p.label!==e.payload); render(); });
+      listen("panel-created", async (e) => {
+        const d = e.payload;
+        panels.push({ label:d.label, url:null, mode:"view", zoom:1.0 });
+        render();
+        await getCurrentWindow().show();
+        await getCurrentWindow().setFocus();
+      });
+
+      render();
+    </script>
+  </body>
+</html>
