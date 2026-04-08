@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "wisdomboard",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "identifier": "com.jwu0330.wisdomboard",
   "build": {
     "beforeDevCommand": "npm run dev",

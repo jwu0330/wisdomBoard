@@ -16,6 +16,18 @@
 
       .body { padding:12px 16px; }
 
+      /* 快捷鍵設定區 */
+      .hotkey-section { margin-bottom:12px; padding:10px 12px; border:1px solid #eee; background:#fafafa; }
+      .hotkey-section .label { font-size:11px; color:#666; margin-bottom:6px; }
+      .hotkey-row { display:flex; align-items:center; gap:6px; }
+      .hotkey-row input { flex:1; padding:6px 10px; border:1px solid #ddd; font-size:12px; font-family:inherit; background:#fff; text-align:center; cursor:pointer; outline:none; }
+      .hotkey-row input:focus { border-color:#111; background:#fffff0; }
+      .hotkey-row button { padding:5px 10px; border:1px solid #ddd; font-size:11px; cursor:pointer; font-family:inherit; background:#fff; }
+      .hotkey-row button:hover { background:#f5f5f5; }
+      .hotkey-row .btn-save { background:#111; color:#fff; border-color:#111; }
+      .hotkey-row .btn-save:hover { background:#333; }
+      .hotkey-msg { font-size:10px; color:#999; margin-top:4px; }
+
       .add-btn { width:100%; padding:14px; border:1px dashed #ccc; background:none; color:#999; font-size:12px; cursor:pointer; font-family:inherit; margin-bottom:10px; }
       .add-btn:hover { border-color:#111; color:#111; }
 
@@ -38,7 +50,6 @@
 
       .empty { text-align:center; padding:30px; color:#ccc; font-size:12px; }
 
-      /* 對話框 */
       .ov { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.3); z-index:100; align-items:center; justify-content:center; }
       .ov.show { display:flex; }
       .dlg { background:#fff; border:1px solid #ddd; width:320px; }
@@ -76,6 +87,17 @@
     </div>
 
     <div class="body">
+      <!-- 快捷鍵設定 -->
+      <div class="hotkey-section">
+        <div class="label">全域快捷鍵</div>
+        <div class="hotkey-row">
+          <input id="hotkey-input" readonly placeholder="按下快捷鍵組合..." title="點擊後按下新的快捷鍵組合" />
+          <button class="btn-save" id="hotkey-save">儲存</button>
+          <button id="hotkey-reset">重設</button>
+        </div>
+        <div class="hotkey-msg" id="hotkey-msg"></div>
+      </div>
+
       <button class="add-btn" id="btn-add">+ 新增面板</button>
       <div id="list"><div class="empty">尚未建立面板</div></div>
     </div>
@@ -116,13 +138,91 @@
       const urlErr = document.getElementById("url-err");
       const urlOk = document.getElementById("url-ok");
 
-      // HTML entity escape 防止 XSS（#46）
       function esc(s) {
         var d = document.createElement("div");
         d.textContent = s;
         return d.innerHTML;
       }
 
+      // === 快捷鍵設定 ===
+      const hotkeyInput = document.getElementById("hotkey-input");
+      const hotkeyMsg = document.getElementById("hotkey-msg");
+      let pendingHotkey = null;
+
+      async function loadHotkey() {
+        try {
+          const cfg = await invoke("get_hotkey_config");
+          hotkeyInput.value = cfg.display_name;
+          pendingHotkey = null;
+        } catch (e) {
+          hotkeyInput.value = "Ctrl+Alt+S";
+        }
+      }
+
+      hotkeyInput.addEventListener("focus", () => {
+        hotkeyInput.value = "請按下快捷鍵...";
+        hotkeyMsg.textContent = "按住修飾鍵（Ctrl/Alt/Shift）再按一個字母或數字鍵";
+      });
+
+      hotkeyInput.addEventListener("blur", () => {
+        if (!pendingHotkey) loadHotkey();
+        hotkeyMsg.textContent = "";
+      });
+
+      hotkeyInput.addEventListener("keydown", (e) => {
+        e.preventDefault();
+        if (["Control","Alt","Shift","Meta"].includes(e.key)) return;
+
+        let mods = 0;
+        const parts = [];
+        if (e.altKey)   { mods |= 0x0001; parts.push("Alt"); }
+        if (e.ctrlKey)  { mods |= 0x0002; parts.push("Ctrl"); }
+        if (e.shiftKey) { mods |= 0x0004; parts.push("Shift"); }
+
+        if (mods === 0) {
+          hotkeyMsg.textContent = "請至少搭配一個修飾鍵（Ctrl/Alt/Shift）";
+          return;
+        }
+
+        const vk = e.keyCode;
+        const keyName = e.key.length === 1 ? e.key.toUpperCase() : e.key;
+        parts.push(keyName);
+        const displayName = parts.join("+");
+
+        hotkeyInput.value = displayName;
+        pendingHotkey = { modifiers: mods, vk, display_name: displayName };
+        hotkeyMsg.textContent = "按「儲存」套用新快捷鍵";
+      });
+
+      document.getElementById("hotkey-save").onclick = async () => {
+        if (!pendingHotkey) { hotkeyMsg.textContent = "尚未設定新快捷鍵"; return; }
+        try {
+          await invoke("set_hotkey", {
+            modifiers: pendingHotkey.modifiers,
+            vk: pendingHotkey.vk,
+            displayName: pendingHotkey.display_name
+          });
+          hotkeyMsg.textContent = "快捷鍵已更新為 " + pendingHotkey.display_name;
+          pendingHotkey = null;
+        } catch (e) {
+          hotkeyMsg.textContent = "設定失敗：" + e;
+        }
+      };
+
+      document.getElementById("hotkey-reset").onclick = async () => {
+        try {
+          await invoke("set_hotkey", { modifiers: 0x0001|0x0002, vk: 0x53, displayName: "Ctrl+Alt+S" });
+          hotkeyInput.value = "Ctrl+Alt+S";
+          pendingHotkey = null;
+          hotkeyMsg.textContent = "已重設為 Ctrl+Alt+S";
+        } catch (e) {
+          hotkeyMsg.textContent = "重設失敗：" + e;
+        }
+      };
+
+      loadHotkey();
+
+      // === 面板管理 ===
       document.getElementById("btn-add").onclick = () => { dlg.classList.add("show"); urlArea.classList.remove("show"); urlErr.classList.remove("show"); };
       document.getElementById("dlg-x").onclick = closeDlg;
       dlg.onclick = (e) => { if (e.target === dlg) closeDlg(); };
@@ -141,19 +241,16 @@
         try { new URL(url); } catch { urlErr.textContent = "網址格式不正確"; urlErr.classList.add("show"); return; }
         try {
           const label = await invoke("create_url_panel", { url });
-          panels.push({ label, url, mode: "view", zoom: 1.0 });
+          panels.push({ label, url, type: "url", mode: "view", zoom: 1.0 });
           render(); closeDlg();
         } catch (e) { urlErr.textContent = "建立失敗：" + e; urlErr.classList.add("show"); }
       }
 
       document.getElementById("opt-cap").onclick = async () => {
         closeDlg();
-        try {
-          await invoke("open_capture_overlay");
-        } catch (e) { alert("建立失敗：" + e); }
+        try { await invoke("open_capture_overlay"); } catch (e) { alert("建立失敗：" + e); }
       };
 
-      // (#52) 解鎖全部 + (#53) 按鈕用詞修正
       document.getElementById("btn-unlock-all").onclick = async () => { panels.forEach(p => p.mode = "view"); await invoke("set_mode", { mode: "view" }); render(); };
       document.getElementById("btn-lock-all").onclick = async () => { panels.forEach(p => p.mode = "locked"); await invoke("set_mode", { mode: "locked" }); render(); };
       document.getElementById("btn-resize-all").onclick = async () => { panels.forEach(p => p.mode = "resize"); await invoke("set_mode", { mode: "resize" }); render(); };
@@ -165,11 +262,10 @@
       function render() {
         document.getElementById("ct").textContent = "面板：" + panels.length;
         if (!panels.length) { listEl.innerHTML = '<div class="empty">尚未建立面板</div>'; return; }
-        // (#46) 使用 esc() 對 URL 做 HTML entity escape
         listEl.innerHTML = panels.map((p, i) => `
           <div class="card">
             <div class="card-top">
-              <span><span class="name">面板 ${i+1}</span><span class="tag">${p.url?'URL':'面板'}</span></span>
+              <span><span class="name">面板 ${i+1}</span><span class="tag">${p.type==='url'?'URL':'擷取'}</span></span>
               <button class="x" onclick="doClose(${i})">&#x2715;</button>
             </div>
             <div class="card-body">
@@ -197,19 +293,18 @@
       listen("panel-closed", (e) => { panels=panels.filter(p=>p.label!==e.payload); render(); });
       listen("panel-created", async (e) => {
         const d = e.payload;
-        panels.push({ label:d.label, url:null, mode:"view", zoom:1.0 });
+        panels.push({ label:d.label, url:null, type:d.type||"capture", mode:"view", zoom:1.0 });
         render();
         await getCurrentWindow().show();
         await getCurrentWindow().setFocus();
       });
 
-      // 設定視窗開啟時，查詢後端已有面板列表（#44）
       async function syncPanels() {
         try {
           const existing = await invoke("list_panels");
           for (const p of existing) {
             if (!panels.find(x => x.label === p.label)) {
-              panels.push({ label: p.label, url: null, mode: "view", zoom: 1.0 });
+              panels.push({ label: p.label, url: p.url || null, type: p.type || "capture", mode: "view", zoom: 1.0 });
             }
           }
           render();
@@ -218,10 +313,9 @@
         }
       }
       syncPanels();
-
       render();
 
-      // Debug: Ctrl+Click 標題觸發測試
+      // Debug: Ctrl+Click 標題
       document.querySelector(".top h1").addEventListener("click", async (e) => {
         if (!e.ctrlKey) return;
         document.getElementById("st").textContent = "執行 Debug 測試中...";

@@ -1,7 +1,7 @@
 # WisdomBoard 開發說明文件
 
-> **版本：** v0.2.0-dev  
-> **最後更新：** 2026-04-08  
+> **版本：** v0.3.0
+> **最後更新：** 2026-04-08
 > **維護者：** jwu0330
 
 ---
@@ -83,7 +83,13 @@ wisdomboard/
 ├── src-tauri/                     # Rust 後端
 │   ├── src/
 │   │   ├── main.rs                # 程式進入點（呼叫 lib::run）
-│   │   └── lib.rs                 # 核心邏輯：面板管理 + 系統匣
+│   │   ├── lib.rs                 # 入口：插件/匣/命令註冊
+│   │   ├── state.rs               # 共用狀態與資料模型
+│   │   ├── panel.rs               # 面板 CRUD 命令
+│   │   ├── capture.rs             # 截圖、Overlay、DWM thumbnail
+│   │   ├── hotkey.rs              # 快捷鍵監聽與自訂
+│   │   ├── persistence.rs         # JSON 設定檔讀寫
+│   │   └── input.rs               # 輸入轉發（PostMessage）
 │   ├── Cargo.toml                 # Rust 依賴管理
 │   ├── tauri.conf.json            # Tauri 應用設定
 │   ├── capabilities/              # 權限定義
@@ -287,10 +293,10 @@ gh run download -n WisdomBoard-Portable
 | 截圖式 Overlay | ✅ 已實作 | GDI 截圖 + 全螢幕 Overlay + 拖拉框選 |
 | 面板管理 UI | ✅ 已實作 | settings.html 面板列表 + 模式/縮放控制 |
 | URL 面板 | ✅ 已實作 | `WebviewUrl::External` 直接載入 |
-| DWM Thumbnail | ❌ 待開發 | 即時縮圖，非截圖 |
-| 輸入轉發 | ❌ 待開發 | `SendInput` / `PostMessage` 座標映射 |
-| 面板持久化 | ❌ 待開發 | JSON 設定檔儲存/恢復面板配置 |
-| 自訂快捷鍵 | ❌ 待開發 | UI 設定自訂快捷鍵組合 |
+| DWM Thumbnail | ✅ 已實作 | `DwmRegisterThumbnail` 即時縮圖，自動偵測目標視窗 |
+| 輸入轉發 | ✅ 已實作 | 操作模式下 `PostMessageW` 座標映射轉發 |
+| 面板持久化 | ✅ 已實作 | JSON 設定檔自動儲存/恢復面板配置 |
+| 自訂快捷鍵 | ✅ 已實作 | 設定視窗 UI 設定 + `PostThreadMessage` 動態註冊 |
 
 ---
 

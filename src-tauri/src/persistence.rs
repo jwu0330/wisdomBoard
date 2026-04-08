@@ -1,0 +1,66 @@
+use crate::state::{AppConfig, AppState, ManagedState};
+use tauri::{AppHandle, Manager};
+
+fn config_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("無法取得 app data 目錄: {e}"))?;
+    Ok(dir.join("config.json"))
+}
+
+pub fn save(app: &AppHandle, state: &AppState) {
+    let config = AppConfig {
+        panels: state.panels.values().cloned().collect(),
+        hotkey: state.hotkey.clone(),
+    };
+
+    let path = match config_path(app) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[WisdomBoard] 儲存設定失敗: {e}");
+            return;
+        }
+    };
+
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    let tmp = path.with_extension("json.tmp");
+    match serde_json::to_string_pretty(&config) {
+        Ok(json) => {
+            if std::fs::write(&tmp, &json).is_ok() {
+                let _ = std::fs::rename(&tmp, &path);
+                println!("[WisdomBoard] 設定已儲存 ({} 個面板)", config.panels.len());
+            }
+        }
+        Err(e) => eprintln!("[WisdomBoard] 序列化設定失敗: {e}"),
+    }
+}
+
+pub fn load(app: &AppHandle) -> Option<AppConfig> {
+    let path = config_path(app).ok()?;
+    let data = std::fs::read_to_string(&path).ok()?;
+    match serde_json::from_str::<AppConfig>(&data) {
+        Ok(config) => {
+            println!(
+                "[WisdomBoard] 已載入設定 ({} 個面板)",
+                config.panels.len()
+            );
+            Some(config)
+        }
+        Err(e) => {
+            eprintln!("[WisdomBoard] 設定檔解析失敗: {e}");
+            None
+        }
+    }
+}
+
+/// 便捷函式：鎖定 state 後自動儲存
+pub fn auto_save(app: &AppHandle) {
+    let state = app.state::<ManagedState>();
+    if let Ok(guard) = state.lock() {
+        save(app, &*guard);
+    }
+}

@@ -10,8 +10,17 @@
       #drag { height:8px; background:#eee; cursor:move; -webkit-app-region:drag; flex-shrink:0; }
       body.locked #drag { cursor:default; -webkit-app-region:no-drag; }
 
-      #content { flex:1; display:flex; align-items:center; justify-content:center; }
+      #content { flex:1; display:flex; align-items:center; justify-content:center; position:relative; }
       #content .ph { text-align:center; color:#ccc; font-size:12px; }
+      /* DWM thumbnail 會渲染在視窗背景層，placeholder 在無 thumbnail 時顯示 */
+      body.has-dwm #content .ph { display:none; }
+
+      /* 操作模式下的互動層 */
+      #interact-layer {
+        position:absolute; inset:0;
+        display:none; cursor:crosshair;
+      }
+      body.interacting #interact-layer { display:block; }
 
       #bar {
         position:absolute; bottom:6px; left:50%; transform:translateX(-50%);
@@ -19,7 +28,6 @@
         padding:2px; opacity:0; transition:opacity 0.15s; pointer-events:none;
       }
       body:hover #bar { opacity:1; pointer-events:auto; }
-      /* 鎖定模式下隱藏工具列（#54） */
       body.locked:hover #bar { opacity:0; pointer-events:none; }
 
       #bar button { width:28px; height:22px; border:1px solid #eee; background:#fff; color:#666; font-size:10px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
@@ -34,7 +42,10 @@
   </head>
   <body>
     <div id="drag"></div>
-    <div id="content"><div class="ph">面板<br><span style="font-size:10px;color:#ddd;">拖拉頂部移動 | 滑鼠懸停顯示工具列</span></div></div>
+    <div id="content">
+      <div class="ph">面板<br><span style="font-size:10px;color:#ddd;">拖拉頂部移動 | 滑鼠懸停顯示工具列</span></div>
+      <div id="interact-layer"></div>
+    </div>
     <div class="resize-r" id="rr"></div>
     <div class="resize-b" id="rb"></div>
     <div class="resize-c" id="rc"></div>
@@ -52,12 +63,12 @@
       var mode = "view";
       var locked = false;
       var win = window.__TAURI__ ? window.__TAURI__.window.getCurrentWindow() : null;
+      var invoke = window.__TAURI__ ? window.__TAURI__.core.invoke : null;
+      var panelLabel = win ? win.label : "";
 
-      // 模式按鈕
       document.querySelectorAll("#bar button[data-m]").forEach(function(btn){
         btn.addEventListener("click", function(){
           if (locked && btn.dataset.m !== "locked") return;
-          // 點擊鎖定按鈕時 toggle：已鎖定則解鎖回 view
           if (btn.dataset.m === "locked" && locked) {
             setMode("view");
           } else {
@@ -74,7 +85,12 @@
       function setMode(m) {
         locked = (m === "locked");
         mode = m;
-        document.body.className = m === "resize" ? "resizing" : (m === "locked" ? "locked" : "");
+        var cls = [];
+        if (m === "resize") cls.push("resizing");
+        if (m === "locked") cls.push("locked");
+        if (m === "interact") cls.push("interacting");
+        if (document.body.classList.contains("has-dwm")) cls.push("has-dwm");
+        document.body.className = cls.join(" ");
         if (win) win.setResizable(m === "resize");
 
         document.querySelectorAll("#bar button[data-m]").forEach(function(b){
@@ -82,7 +98,7 @@
         });
       }
 
-      // 調整大小（#50: 初始化 rsw/rsh 避免 NaN）
+      // 調整大小
       var resizing = false, rtype = "", rsx = 0, rsy = 0, rsw = 400, rsh = 300;
       ["rr","rb","rc"].forEach(function(id){
         document.getElementById(id).addEventListener("mousedown", function(e){
@@ -103,6 +119,45 @@
         win.setSize(new window.__TAURI__.window.LogicalSize(nw,nh));
       });
       document.addEventListener("mouseup", function(){ resizing=false; });
+
+      // === 輸入轉發（操作模式）===
+      var interactLayer = document.getElementById("interact-layer");
+
+      function forwardEvent(eventType, e, keyCode) {
+        if (!invoke || mode !== "interact") return;
+        var rect = interactLayer.getBoundingClientRect();
+        invoke("forward_input", {
+          label: panelLabel,
+          eventType: eventType,
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top,
+          panelWidth: rect.width,
+          panelHeight: rect.height,
+          keyCode: keyCode || null
+        }).catch(function(){});
+      }
+
+      interactLayer.addEventListener("mousemove", function(e){ forwardEvent("mousemove", e); });
+      interactLayer.addEventListener("mousedown", function(e){
+        if (e.button === 0) forwardEvent("mousedown", e);
+        if (e.button === 2) forwardEvent("contextmenu", e);
+      });
+      interactLayer.addEventListener("mouseup", function(e){
+        if (e.button === 0) forwardEvent("mouseup", e);
+        if (e.button === 2) forwardEvent("contextmenuup", e);
+      });
+      interactLayer.addEventListener("contextmenu", function(e){ e.preventDefault(); });
+
+      document.addEventListener("keydown", function(e){
+        if (mode === "interact" && invoke) {
+          forwardEvent("keydown", e, e.keyCode);
+        }
+      });
+      document.addEventListener("keyup", function(e){
+        if (mode === "interact" && invoke) {
+          forwardEvent("keyup", e, e.keyCode);
+        }
+      });
 
       // 監聽模式切換事件
       if (window.__TAURI__) {
