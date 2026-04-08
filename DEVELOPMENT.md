@@ -309,7 +309,8 @@ gh run download -n WisdomBoard-Portable
 | `greet` 指令殘留未使用 | 移除 greet 函式與 invoke_handler | `lib.rs` |
 | autostart 插件載入但未啟用 | 加入 `autostart_manager.enable()` | `lib.rs:84` |
 | `EnumWindows` 前未重置全域變數 | 呼叫前重置 `WORKERW_HWND` 為 0 | `lib.rs:54` |
-| `SetParent` 無錯誤處理 | 加入 `match` + 錯誤日誌 | `lib.rs:63` |
+| `SetParent` 無錯誤處理 | 比較 `HWND(0)` 判斷失敗 | `lib.rs:72` |
+| `SetParent` 誤用 `match Ok/Err` | 修正為比較回傳值（見踩坑紀錄） | `lib.rs:70-75` |
 
 ---
 
@@ -328,3 +329,45 @@ gh run download -n WisdomBoard-Portable
 - 所有變更必須透過 Git 提交並推送到 GitHub
 - 每次功能完成後進行一次 commit
 - commit message 格式：`feat:` / `fix:` / `ci:` / `docs:` 開頭
+
+---
+
+## 10. 踩坑紀錄與經驗教訓
+
+### 10.1 windows crate API 回傳型態不一致
+
+**問題：** `windows` crate 0.52 中，不同 Win32 函式的回傳型態不統一：
+
+| 函式 | 回傳型態 | 錯誤檢查方式 |
+|------|----------|-------------|
+| `FindWindowW` | `HWND` | `== HWND(0)` 表示找不到 |
+| `FindWindowExW` | `HWND` | `== HWND(0)` 表示找不到 |
+| `SendMessageTimeoutW` | `LRESULT` | `== LRESULT(0)` 表示逾時/失敗 |
+| `SetParent` | `HWND` | `== HWND(0)` 表示失敗 |
+| `EnumWindows` | `Result<()>` | 標準 `Result` 錯誤處理 |
+
+**教訓：** 不能假設所有 Win32 函式都回傳 `Result`。在使用 `match Ok/Err` 之前，必須先到 `~/.cargo/registry/src/` 中確認該函式的實際簽名：
+```bash
+grep "pub unsafe fn 函式名稱" ~/.cargo/registry/src/index.crates.io-*/windows-0.52.0/src/Windows/Win32/UI/WindowsAndMessaging/mod.rs
+```
+
+### 10.2 本機無法編譯 Rust（缺少 Windows SDK）
+
+**問題：** 本機有 VS 2022 Community 和 Rust toolchain，但未安裝 Windows SDK，導致 `rust-lld` 找不到 `kernel32.lib`。
+
+**解決方式：** 所有建置透過 GitHub Actions 完成（`windows-latest` runner 已內建完整 SDK）。
+
+**如需本機編譯：** 透過 Visual Studio Installer → 修改 → 個別元件 → 勾選「Windows 11 SDK」。
+
+### 10.3 修改程式碼後務必驗證 API 簽名
+
+**流程：** 修改 Rust 程式碼 → 確認所有使用的 API 簽名 → 提交 → 推送 → 等 CI/CD 結果
+
+**驗證方法：**
+```bash
+# 查看某個 crate 中函式的實際簽名
+grep "pub unsafe fn 函式名" ~/.cargo/registry/src/index.crates.io-*/crate-name-version/src/**/*.rs
+
+# 查看 trait 定義
+grep -A5 "pub trait TraitName" ~/.cargo/registry/src/index.crates.io-*/crate-name-version/src/**/*.rs
+```

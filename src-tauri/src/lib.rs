@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicIsize, Ordering};
 use tauri::{Manager, Runtime, WebviewWindow};
 use windows::core::{w, PCWSTR};
-use windows::Win32::Foundation::{BOOL, HWND, LPARAM, WPARAM};
+use windows::Win32::Foundation::{BOOL, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, FindWindowExW, FindWindowW, SendMessageTimeoutW, SetParent, SMTO_NORMAL,
 };
@@ -40,6 +40,7 @@ pub fn pin_to_desktop<R: Runtime>(window: &WebviewWindow<R>) -> bool {
         }
 
         // 2. 發送 0x052C 訊息給 Progman，強迫生成 WorkerW 圖層
+        // SendMessageTimeoutW 回傳 LRESULT（非 Result），0 表示逾時或失敗
         let send_result = SendMessageTimeoutW(
             progman,
             0x052C,
@@ -49,9 +50,8 @@ pub fn pin_to_desktop<R: Runtime>(window: &WebviewWindow<R>) -> bool {
             1000,
             None,
         );
-        if send_result.is_err() {
-            eprintln!("[WisdomBoard] 發送 0x052C 訊息失敗");
-            return false;
+        if send_result == LRESULT(0) {
+            eprintln!("[WisdomBoard] 發送 0x052C 訊息逾時或失敗，仍嘗試繼續");
         }
 
         // 3. 遍歷所有的 WorkerW 以尋找剛剛生成的目標層級
@@ -67,16 +67,15 @@ pub fn pin_to_desktop<R: Runtime>(window: &WebviewWindow<R>) -> bool {
             progman
         };
 
-        match SetParent(tauri_hwnd, target_hwnd) {
-            Ok(_) => {
-                println!("[WisdomBoard] 成功掛載到桌面圖層");
-                true
-            }
-            Err(e) => {
-                eprintln!("[WisdomBoard] SetParent 失敗: {e}");
-                false
-            }
+        // SetParent 回傳 HWND（非 Result），HWND(0) 表示失敗
+        let prev_parent = SetParent(tauri_hwnd, target_hwnd);
+        if prev_parent == HWND(0) {
+            eprintln!("[WisdomBoard] SetParent 失敗");
+            return false;
         }
+
+        println!("[WisdomBoard] 成功掛載到桌面圖層");
+        true
     }
 }
 
