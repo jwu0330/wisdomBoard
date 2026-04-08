@@ -86,11 +86,11 @@ fn create_url_panel(app: AppHandle, url: String) -> Result<String, String> {
     let webview_url = tauri::WebviewUrl::App("src/webpanel.html".into());
     let navigated = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let builder = tauri::WebviewWindowBuilder::new(&app, &label, webview_url)
-        .title(format!("WisdomBoard Panel {}", id))
-        .inner_size(480.0, 360.0)
-        .decorations(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
+        .title(format!("WisdomBoard - {}", url))
+        .inner_size(800.0, 600.0)
+        .decorations(true)       // 保留視窗框架，確保使用者可以關閉
+        .always_on_top(false)    // 不強制置頂，避免擋住其他視窗
+        .skip_taskbar(false)
         .transparent(false)
         .on_navigation(|_url| true)  // 允許所有導航（包括重導向到外部 URL）
         .on_page_load({
@@ -265,12 +265,12 @@ fn open_capture_overlay(app: AppHandle) -> Result<(), String> {
 
     let url = tauri::WebviewUrl::App("src/overlay.html".into());
     let builder = tauri::WebviewWindowBuilder::new(&app, "overlay", url)
-        .title("框選區域")
+        .title("WisdomBoard - 框選區域 (按 ESC 或關閉視窗取消)")
         .inner_size(screen_w as f64, screen_h as f64)
         .position(0.0, 0.0)
-        .decorations(false)
+        .decorations(true)       // 保留標題列，確保使用者可以關閉
         .always_on_top(true)
-        .skip_taskbar(true)
+        .skip_taskbar(false)
         .transparent(false)
         .resizable(false)
         .on_page_load(move |wv, payload| {
