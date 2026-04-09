@@ -7,11 +7,11 @@ use windows::Win32::Graphics::Dwm::{
 };
 use windows::Win32::Graphics::Gdi::{
     BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC,
-    GetDIBits, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
+    GetDIBits, MapWindowPoints, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
     DIB_RGB_COLORS, SRCCOPY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetSystemMetrics, MapWindowPoints, WindowFromPoint,
+    GetSystemMetrics, WindowFromPoint,
     SM_CXSCREEN, SM_CYSCREEN,
 };
 
@@ -22,9 +22,18 @@ pub fn capture_screen_to_file() -> Result<String, String> {
         let h = GetSystemMetrics(SM_CYSCREEN);
 
         let screen_dc = GetDC(HWND(0));
+        if screen_dc.is_invalid() {
+            return Err("GetDC 失敗".into());
+        }
         let mem_dc = CreateCompatibleDC(screen_dc);
         let bmp = CreateCompatibleBitmap(screen_dc, w, h);
         let old = SelectObject(mem_dc, bmp);
+        if old.0 as isize == -1 {
+            let _ = DeleteObject(bmp);
+            let _ = DeleteDC(mem_dc);
+            ReleaseDC(HWND(0), screen_dc);
+            return Err("SelectObject 失敗".into());
+        }
 
         let blt_result = BitBlt(mem_dc, 0, 0, w, h, screen_dc, 0, 0, SRCCOPY);
         if let Err(e) = blt_result {
@@ -53,11 +62,18 @@ pub fn capture_screen_to_file() -> Result<String, String> {
             ..Default::default()
         };
 
-        GetDIBits(
+        let scan_lines = GetDIBits(
             mem_dc, bmp, 0, h as u32,
             Some(pixels.as_mut_ptr() as *mut _),
             &mut bi, DIB_RGB_COLORS,
         );
+        if scan_lines == 0 {
+            SelectObject(mem_dc, old);
+            let _ = DeleteObject(bmp);
+            let _ = DeleteDC(mem_dc);
+            ReleaseDC(HWND(0), screen_dc);
+            return Err("GetDIBits 失敗".into());
+        }
 
         SelectObject(mem_dc, old);
         let _ = DeleteObject(bmp);
@@ -101,17 +117,34 @@ pub fn open_capture_overlay(app: AppHandle) -> Result<(), String> {
 
     let screenshot_path = capture_screen_to_file()?;
 
+    let scale = app.primary_monitor()
+        .ok()
+        .flatten()
+        .map(|m| m.scale_factor())
+        .unwrap_or(1.0);
+
     let (screen_w, screen_h) = unsafe {
         (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN))
     };
 
+    // 轉換為邏輯像素
+    let logical_w = screen_w as f64 / scale;
+    let logical_h = screen_h as f64 / scale;
+
     let safe_path_js = serde_json::to_string(&screenshot_path)
-        .unwrap_or_else(|_| format!("\"{}\"", screenshot_path.replace('\\', "\\\\")));
+        .unwrap_or_else(|_| {
+            let escaped = screenshot_path
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('\n', "\\n")
+                .replace('\r', "\\r");
+            format!("\"{}\"", escaped)
+        });
 
     let url = tauri::WebviewUrl::App("src/overlay.html".into());
     let builder = tauri::WebviewWindowBuilder::new(&app, "overlay", url)
         .title("WisdomBoard - 框選區域 (按 ESC 或關閉視窗取消)")
-        .inner_size(screen_w as f64, screen_h as f64)
+        .inner_size(logical_w, logical_h)
         .position(0.0, 0.0)
         .decorations(true)
         .always_on_top(true)
@@ -127,7 +160,7 @@ pub fn open_capture_overlay(app: AppHandle) -> Result<(), String> {
 
     match builder.build() {
         Ok(_) => {
-            println!("[WisdomBoard] 框選 Overlay 已開啟 ({}x{})", screen_w, screen_h);
+            println!("[WisdomBoard] 框選 Overlay 已開啟 ({}x{} logical, scale: {})", logical_w, logical_h, scale);
             Ok(())
         }
         Err(e) => Err(format!("{e}")),
@@ -140,15 +173,22 @@ pub fn capture_region(
     app: AppHandle,
     x: f64, y: f64, width: f64, height: f64,
 ) -> Result<String, String> {
-    let scale = app
-        .get_webview_window("overlay")
-        .and_then(|w| w.scale_factor().ok())
+    // 使用主螢幕 scale_factor
+    let scale = app.primary_monitor()
+        .ok()
+        .flatten()
+        .map(|m| m.scale_factor())
         .unwrap_or(1.0);
 
     let phys_x = (x * scale) as i32;
     let phys_y = (y * scale) as i32;
     let phys_w = (width * scale) as i32;
     let phys_h = (height * scale) as i32;
+
+    // 先隱藏 Overlay 以避免 WindowFromPoint 偵測到它
+    if let Some(overlay_win) = app.get_webview_window("overlay") {
+        let _ = overlay_win.hide();
+    }
 
     // 偵測擷取區域中心的目標視窗
     let center = POINT {
@@ -221,7 +261,7 @@ pub fn capture_region(
                             source_rect,
                         },
                     );
-                }
+                };
             }
 
             // 監聽視窗事件
@@ -284,7 +324,7 @@ fn register_dwm_thumbnail(
 ) {
     // 取得面板視窗的 HWND
     let panel_hwnd = match win.hwnd() {
-        Ok(hwnd) => HWND(hwnd.0),
+        Ok(hwnd) => HWND(hwnd.0 as isize),
         Err(_) => return,
     };
 
@@ -297,7 +337,7 @@ fn register_dwm_thumbnail(
                 props.fVisible = windows::Win32::Foundation::BOOL(1);
                 props.rcDestination = RECT {
                     left: 0,
-                    top: 8,
+                    top: 0,
                     right: panel_w,
                     bottom: panel_h,
                 };
@@ -312,18 +352,14 @@ fn register_dwm_thumbnail(
                     };
                 }
 
-                // dwFlags 可能是 u32 或 flag type，用 transmute 確保相容
-                std::ptr::write(
-                    &mut props.dwFlags as *mut _ as *mut u32,
-                    flags,
-                );
+                props.dwFlags = flags;
 
                 let _ = DwmUpdateThumbnailProperties(thumb_id, &props);
 
                 let state = app.state::<ManagedState>();
                 if let Ok(mut guard) = state.lock() {
                     guard.dwm_thumbnails.insert(label.to_string(), thumb_id);
-                }
+                };
                 println!("[WisdomBoard] DWM thumbnail 已註冊: {}", label);
             }
             Err(e) => {
@@ -355,7 +391,7 @@ fn update_panel_position(app: &AppHandle, label: &str, x: f64, y: f64) {
             panel.x = x;
             panel.y = y;
         }
-    }
+    };
     // 延遲儲存（移動事件頻繁，不需每次都寫檔）
 }
 
@@ -370,17 +406,18 @@ fn update_panel_size(app: &AppHandle, label: &str, width: f64, height: f64) {
         if let Some(&thumb_id) = guard.dwm_thumbnails.get(label) {
             unsafe {
                 let mut props: DWM_THUMBNAIL_PROPERTIES = std::mem::zeroed();
-                std::ptr::write(&mut props.dwFlags as *mut _ as *mut u32, 0x01_u32);
+                props.dwFlags = 0x01_u32;
                 props.rcDestination = RECT {
                     left: 0,
-                    top: 8,
+                    top: 0,
                     right: width as i32,
                     bottom: height as i32,
                 };
                 let _ = DwmUpdateThumbnailProperties(thumb_id, &props);
             }
         }
-    }
+    };
+    crate::persistence::auto_save(app);
 }
 
 /// Debug 測試

@@ -98,6 +98,14 @@
         <div class="hotkey-msg" id="hotkey-msg"></div>
       </div>
 
+      <!-- 開機自動啟動 -->
+      <div class="hotkey-section">
+        <div class="label">開機自動啟動</div>
+        <div class="hotkey-row">
+          <label><input type="checkbox" id="autostart-toggle" /> 啟用開機自動啟動</label>
+        </div>
+      </div>
+
       <button class="add-btn" id="btn-add">+ 新增面板</button>
       <div id="list"><div class="empty">尚未建立面板</div></div>
     </div>
@@ -184,7 +192,15 @@
           return;
         }
 
-        const vk = e.keyCode;
+        const KEY_MAP = {
+          'F1':112,'F2':113,'F3':114,'F4':115,'F5':116,'F6':117,
+          'F7':118,'F8':119,'F9':120,'F10':121,'F11':122,'F12':123,
+          'ArrowLeft':37,'ArrowRight':39,'ArrowUp':38,'ArrowDown':40,
+          'Home':36,'End':35,'PageUp':33,'PageDown':34,
+          'Insert':45,'Delete':46,'Escape':27,'Tab':9,
+          'Enter':13,'Space':32,'Backspace':8,
+        };
+        const vk = KEY_MAP[e.key] || e.keyCode;
         const keyName = e.key.length === 1 ? e.key.toUpperCase() : e.key;
         parts.push(keyName);
         const displayName = parts.join("+");
@@ -221,6 +237,22 @@
       };
 
       loadHotkey();
+
+      // === autostart ===
+      async function loadAutostart() {
+        try {
+          const enabled = await invoke("get_autostart");
+          document.getElementById("autostart-toggle").checked = enabled;
+        } catch {}
+      }
+      document.getElementById("autostart-toggle").addEventListener("change", async (e) => {
+        try {
+          await invoke("set_autostart", { enabled: e.target.checked });
+        } catch (err) {
+          hotkeyMsg.textContent = "自啟動設定失敗：" + err;
+        }
+      });
+      loadAutostart();
 
       // === 面板管理 ===
       document.getElementById("btn-add").onclick = () => { dlg.classList.add("show"); urlArea.classList.remove("show"); urlErr.classList.remove("show"); };
@@ -266,19 +298,19 @@
           <div class="card">
             <div class="card-top">
               <span><span class="name">面板 ${i+1}</span><span class="tag">${p.type==='url'?'URL':'擷取'}</span></span>
-              <button class="x" onclick="doClose(${i})">&#x2715;</button>
+              <button class="x" onclick="doClose(${JSON.stringify(p.label)})">&#x2715;</button>
             </div>
             <div class="card-body">
               ${p.url ? '<div class="card-url">'+esc(p.url)+'</div>' : ''}
               <div class="pills">
-                <button class="pill ${p.mode==='view'?'on':''}" onclick="doMode(${i},'view')">觀看</button>
-                <button class="pill ${p.mode==='interact'?'on':''}" onclick="doMode(${i},'interact')">操作</button>
-                <button class="pill ${p.mode==='resize'?'on':''}" onclick="doMode(${i},'resize')">調整</button>
-                <button class="pill ${p.mode==='locked'?'on':''}" onclick="doMode(${i},'locked')">鎖定</button>
+                <button class="pill ${p.mode==='view'?'on':''}" onclick="doMode(${JSON.stringify(p.label)},'view')">觀看</button>
+                <button class="pill ${p.mode==='interact'?'on':''}" onclick="doMode(${JSON.stringify(p.label)},'interact')">操作</button>
+                <button class="pill ${p.mode==='resize'?'on':''}" onclick="doMode(${JSON.stringify(p.label)},'resize')">調整</button>
+                <button class="pill ${p.mode==='locked'?'on':''}" onclick="doMode(${JSON.stringify(p.label)},'locked')">鎖定</button>
               </div>
               <div class="zoom-row">
                 <span>縮放</span>
-                <input type="range" min="10" max="200" value="${Math.round(p.zoom*100)}" oninput="doZoom(${i},this.value)" />
+                <input type="range" min="10" max="200" value="${Math.round(p.zoom*100)}" oninput="doZoom(${JSON.stringify(p.label)},this.value)" />
                 <span class="val" id="zv-${i}">${Math.round(p.zoom*100)}%</span>
               </div>
             </div>
@@ -286,9 +318,30 @@
         `).join("");
       }
 
-      window.doClose = async (i) => { try { await invoke("close_panel",{label:panels[i].label}); } catch {} panels.splice(i,1); render(); };
-      window.doMode = async (i,m) => { panels[i].mode=m; try{await invoke("set_panel_mode",{label:panels[i].label,mode:m});}catch{} render(); };
-      window.doZoom = async (i,v) => { const z=parseInt(v)/100; panels[i].zoom=z; const el=document.getElementById("zv-"+i); if(el)el.textContent=v+"%"; try{await invoke("set_panel_zoom",{label:panels[i].label,zoom:z});}catch{} };
+      window.doClose = async (label) => {
+        try {
+          await invoke("close_panel", { label });
+          panels = panels.filter(p => p.label !== label);
+          render();
+        } catch (e) {
+          console.warn("[settings] close_panel 失敗:", e);
+        }
+      };
+      window.doMode = async (label, m) => {
+        const p = panels.find(x => x.label === label);
+        if (p) { p.mode = m; }
+        try { await invoke("set_panel_mode", { label, mode: m }); } catch {}
+        render();
+      };
+      window.doZoom = async (label, v) => {
+        const z = parseInt(v) / 100;
+        const p = panels.find(x => x.label === label);
+        if (p) { p.zoom = z; }
+        const idx = panels.findIndex(x => x.label === label);
+        const el = document.getElementById("zv-" + idx);
+        if (el) el.textContent = v + "%";
+        try { await invoke("set_panel_zoom", { label, zoom: z }); } catch {}
+      };
 
       listen("panel-closed", (e) => { panels=panels.filter(p=>p.label!==e.payload); render(); });
       listen("panel-created", async (e) => {
@@ -303,8 +356,15 @@
         try {
           const existing = await invoke("list_panels");
           for (const p of existing) {
-            if (!panels.find(x => x.label === p.label)) {
-              panels.push({ label: p.label, url: p.url || null, type: p.type || "capture", mode: "view", zoom: 1.0 });
+            const found = panels.find(x => x.label === p.label);
+            if (!found) {
+              panels.push({
+                label: p.label,
+                url: p.url || null,
+                type: p.type || "capture",
+                mode: p.mode || "view",
+                zoom: p.zoom || 1.0
+              });
             }
           }
           render();

@@ -69,10 +69,16 @@
       document.querySelectorAll("#bar button[data-m]").forEach(function(btn){
         btn.addEventListener("click", function(){
           if (locked && btn.dataset.m !== "locked") return;
+          var newMode;
           if (btn.dataset.m === "locked" && locked) {
-            setMode("view");
+            newMode = "view";
           } else {
-            setMode(btn.dataset.m);
+            newMode = btn.dataset.m;
+          }
+          setMode(newMode);
+          // 通知後端
+          if (invoke && panelLabel) {
+            invoke("set_panel_mode", { label: panelLabel, mode: newMode }).catch(function(){});
           }
         });
       });
@@ -106,7 +112,12 @@
           resizing = true;
           rtype = id;
           rsx = e.screenX; rsy = e.screenY;
-          win.innerSize().then(function(s){ rsw=s.width; rsh=s.height; });
+          win.scaleFactor().then(function(sf) {
+            win.innerSize().then(function(s) {
+              rsw = s.width / sf;
+              rsh = s.height / sf;
+            });
+          });
           e.preventDefault();
         });
       });
@@ -126,14 +137,18 @@
       function forwardEvent(eventType, e, keyCode) {
         if (!invoke || mode !== "interact") return;
         var rect = interactLayer.getBoundingClientRect();
+        var pw = rect.width;
+        var ph = rect.height;
+        if (pw === 0 || ph === 0) return; // 防止除以零
         invoke("forward_input", {
           label: panelLabel,
           eventType: eventType,
           x: e.clientX - rect.left,
           y: e.clientY - rect.top,
-          panelWidth: rect.width,
-          panelHeight: rect.height,
-          keyCode: keyCode || null
+          panelWidth: pw,
+          panelHeight: ph,
+          keyCode: keyCode || null,
+          buttons: e.buttons || 0
         }).catch(function(){});
       }
 

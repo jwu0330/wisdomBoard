@@ -37,6 +37,27 @@ pub fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
     }
 }
 
+#[tauri::command]
+fn get_autostart(state: tauri::State<'_, ManagedState>) -> bool {
+    state.lock().map(|g| g.autostart).unwrap_or(true)
+}
+
+#[tauri::command]
+fn set_autostart(app: tauri::AppHandle, state: tauri::State<'_, ManagedState>, enabled: bool) -> Result<(), String> {
+    {
+        let mut guard = state.lock().map_err(|e| format!("{e}"))?;
+        guard.autostart = enabled;
+    }
+    let autostart_manager = app.autolaunch();
+    if enabled {
+        autostart_manager.enable().map_err(|e| format!("{e}"))?;
+    } else {
+        autostart_manager.disable().map_err(|e| format!("{e}"))?;
+    }
+    crate::persistence::auto_save(&app);
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -47,14 +68,6 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(Mutex::new(state::AppState::default()) as ManagedState)
         .setup(|app| {
-            // 自動啟動
-            let autostart_manager = app.autolaunch();
-            if !autostart_manager.is_enabled().unwrap_or(false) {
-                if let Err(e) = autostart_manager.enable() {
-                    eprintln!("[WisdomBoard] 自啟動設定失敗: {e}");
-                }
-            }
-
             // 隱藏主視窗
             if let Some(main_window) = app.get_webview_window("main") {
                 let _ = main_window.hide();
@@ -66,6 +79,27 @@ pub fn run() {
                 let state = app.state::<ManagedState>();
                 if let Ok(mut guard) = state.lock() {
                     guard.hotkey = config.hotkey.clone();
+                    guard.autostart = config.autostart;
+                };
+            }
+
+            // 依設定決定是否自動開機
+            let should_autostart = {
+                let state = app.state::<ManagedState>();
+                state.lock().map(|g| g.autostart).unwrap_or(true)
+            };
+            let autostart_manager = app.autolaunch();
+            if should_autostart {
+                if !autostart_manager.is_enabled().unwrap_or(false) {
+                    if let Err(e) = autostart_manager.enable() {
+                        eprintln!("[WisdomBoard] 自啟動設定失敗: {e}");
+                    }
+                }
+            } else {
+                if autostart_manager.is_enabled().unwrap_or(false) {
+                    if let Err(e) = autostart_manager.disable() {
+                        eprintln!("[WisdomBoard] 停用自啟動失敗: {e}");
+                    }
                 }
             }
 
@@ -125,12 +159,30 @@ pub fn run() {
             hotkey::get_hotkey_config,
             hotkey::set_hotkey,
             input::forward_input,
+            get_autostart,
+            set_autostart,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app, event| {
-            if let tauri::RunEvent::ExitRequested { api, .. } = event {
-                api.prevent_exit();
+        .run(|app, event| {
+            match event {
+                tauri::RunEvent::ExitRequested { api, .. } => {
+                    api.prevent_exit();
+                }
+                tauri::RunEvent::Exit => {
+                    // 終止快捷鍵執行緒
+                    let state = app.state::<ManagedState>();
+                    if let Ok(guard) = state.lock() {
+                        if let Some(tid) = guard.hotkey_thread_id {
+                            unsafe {
+                                use windows::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
+                                use windows::Win32::Foundation::{WPARAM, LPARAM};
+                                let _ = PostThreadMessageW(tid, WM_QUIT, WPARAM(0), LPARAM(0));
+                            }
+                        }
+                    };
+                }
+                _ => {}
             }
         });
 }

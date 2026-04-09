@@ -24,16 +24,16 @@ pub fn start_listener(app_handle: AppHandle) {
             let state = app.state::<ManagedState>();
             if let Ok(mut guard) = state.lock() {
                 guard.hotkey_thread_id = Some(thread_id);
-            }
+            };
         }
 
         // 從 state 讀取快捷鍵設定
         let (modifiers, vk) = {
             let state = app.state::<ManagedState>();
-            match state.lock() {
+            let x = match state.lock() {
                 Ok(guard) => (guard.hotkey.modifiers, guard.hotkey.vk),
                 Err(_) => (0x0001 | 0x0002, 0x53), // 預設 Ctrl+Alt+S
-            }
+            }; x
         };
 
         unsafe {

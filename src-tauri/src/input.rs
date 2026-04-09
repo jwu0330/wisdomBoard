@@ -18,6 +18,9 @@ fn map_coordinates(
     panel_h: f64,
     source_rect: &[i32; 4],
 ) -> (i32, i32) {
+    if panel_w == 0.0 || panel_h == 0.0 {
+        return (source_rect[0], source_rect[1]);
+    }
     let ratio_x = panel_x / panel_w;
     let ratio_y = panel_y / panel_h;
     let target_x = source_rect[0] + (ratio_x * source_rect[2] as f64) as i32;
@@ -36,44 +39,52 @@ pub fn forward_input(
     panel_width: f64,
     panel_height: f64,
     key_code: Option<u32>,
+    buttons: Option<u32>,
 ) -> Result<(), String> {
-    let state = app.state::<ManagedState>();
-    let guard = state.lock().map_err(|e| format!("{e}"))?;
+    let (target_hwnd, source_rect) = {
+        let state = app.state::<ManagedState>();
+        let guard = state.lock().map_err(|e| format!("{e}"))?;
 
-    let panel = guard
-        .panels
-        .get(&label)
-        .ok_or_else(|| format!("找不到面板: {}", label))?;
+        let panel = guard
+            .panels
+            .get(&label)
+            .ok_or_else(|| format!("找不到面板: {}", label))?;
 
-    if panel.mode != "interact" {
-        return Ok(()); // 非操作模式，忽略
-    }
+        if panel.mode != "interact" {
+            return Ok(()); // 非操作模式，忽略
+        }
 
-    let target_hwnd = panel
-        .target_hwnd
-        .ok_or("此面板無目標視窗")?;
-    let source_rect = panel
-        .source_rect
-        .as_ref()
-        .ok_or("此面板無來源區域資訊")?;
+        let target_hwnd = panel
+            .target_hwnd
+            .ok_or("此面板無目標視窗")?;
+        let source_rect = panel
+            .source_rect
+            .ok_or("此面板無來源區域資訊")?;
 
-    let (tx, ty) = map_coordinates(x, y, panel_width, panel_height, source_rect);
+        (target_hwnd, source_rect)
+    }; // Mutex released here
+
+    let (tx, ty) = map_coordinates(x, y, panel_width, panel_height, &source_rect);
     let hwnd = HWND(target_hwnd);
+
+    // 計算 mouse buttons wParam (MK_LBUTTON=1, MK_RBUTTON=2, MK_MBUTTON=16)
+    let mk_flags = buttons.unwrap_or(0);
 
     unsafe {
         let result = match event_type.as_str() {
-            "mousemove" => PostMessageW(hwnd, WM_MOUSEMOVE, WPARAM(0), make_lparam(tx, ty)),
+            "mousemove" => PostMessageW(hwnd, WM_MOUSEMOVE, WPARAM(mk_flags as usize), make_lparam(tx, ty)),
             "mousedown" => PostMessageW(hwnd, WM_LBUTTONDOWN, WPARAM(0x0001), make_lparam(tx, ty)),
             "mouseup" => PostMessageW(hwnd, WM_LBUTTONUP, WPARAM(0), make_lparam(tx, ty)),
             "contextmenu" => PostMessageW(hwnd, WM_RBUTTONDOWN, WPARAM(0x0002), make_lparam(tx, ty)),
             "contextmenuup" => PostMessageW(hwnd, WM_RBUTTONUP, WPARAM(0), make_lparam(tx, ty)),
             "keydown" => {
                 let vk = key_code.unwrap_or(0);
-                PostMessageW(hwnd, WM_KEYDOWN, WPARAM(vk as usize), LPARAM(0))
+                PostMessageW(hwnd, WM_KEYDOWN, WPARAM(vk as usize), LPARAM(1)) // repeat count = 1
             }
             "keyup" => {
                 let vk = key_code.unwrap_or(0);
-                PostMessageW(hwnd, WM_KEYUP, WPARAM(vk as usize), LPARAM(0))
+                // keyup: transition state = 1 (bit 31), previous state = 1 (bit 30)
+                PostMessageW(hwnd, WM_KEYUP, WPARAM(vk as usize), LPARAM(0xC0000001u32 as isize))
             }
             _ => return Ok(()),
         };

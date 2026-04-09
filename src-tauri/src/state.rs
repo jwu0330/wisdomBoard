@@ -46,15 +46,23 @@ impl Default for HotkeyConfig {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AppConfig {
+    #[serde(default = "default_version")]
+    pub version: u32,
     pub panels: Vec<PanelConfig>,
     pub hotkey: HotkeyConfig,
+    #[serde(default)]
+    pub autostart: bool,
 }
+
+fn default_version() -> u32 { 1 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
+            version: 1,
             panels: Vec::new(),
             hotkey: HotkeyConfig::default(),
+            autostart: true,
         }
     }
 }
@@ -66,6 +74,7 @@ pub struct AppState {
     pub dwm_thumbnails: HashMap<String, isize>,
     /// 快捷鍵監聽執行緒 ID（用於 PostThreadMessage）
     pub hotkey_thread_id: Option<u32>,
+    pub autostart: bool,
 }
 
 impl Default for AppState {
@@ -75,6 +84,7 @@ impl Default for AppState {
             hotkey: HotkeyConfig::default(),
             dwm_thumbnails: HashMap::new(),
             hotkey_thread_id: None,
+            autostart: true,
         }
     }
 }
