@@ -363,9 +363,11 @@
           const flag = btn.dataset.flag;
           const p = panels.find(x => x.label === label);
           if (!p) return;
-          // toggle
-          p[flag] = !p[flag];
-          // 計算 mode：editing=edit, passthrough=locked, 都關=locked（但不穿透）
+          // toggle：editing 和 passthrough 互斥
+          const newVal = !p[flag];
+          p.editing = false;
+          p.passthrough = false;
+          if (newVal) p[flag] = true;
           const mode = p.editing ? "edit" : (p.passthrough ? "passthrough" : "locked");
           try {
             await invoke("set_panel_mode", { label, mode });
@@ -418,15 +420,20 @@
             const found = panels.find(x => x.label === p.label);
             if (found) {
               found.mode = p.mode ?? found.mode;
+              found.editing = found.mode === "edit";
+              found.passthrough = found.mode === "passthrough";
               found.zoom = (typeof p.zoom === "number") ? p.zoom : found.zoom;
               found.url = p.url ?? found.url;
             } else {
+              const m = p.mode ?? "locked";
               panels.push({
                 label: p.label,
                 url: p.url ?? null,
                 type: p.type ?? "capture",
-                mode: p.mode ?? "locked",
-                zoom: (typeof p.zoom === "number") ? p.zoom : 1.0
+                mode: m,
+                zoom: (typeof p.zoom === "number") ? p.zoom : 1.0,
+                editing: m === "edit",
+                passthrough: m === "passthrough"
               });
             }
           }

@@ -444,11 +444,14 @@ pub fn set_panel_mode(app: AppHandle, label: String, mode: String) -> Result<(),
             }
             let _ = window.show();
             if is_url {
-                // 移除 drag overlay + 阻止全螢幕
+                // 移除 drag overlay + 全螢幕填滿面板而非整個螢幕
                 let _ = window.eval(
                     "var d=document.getElementById('wb-drag-overlay'); if(d) d.style.display='none';\
-                     document.documentElement.requestFullscreen = function(){};\
-                     if(document.exitFullscreen) document.exitFullscreen();"
+                     if(!document.getElementById('wb-fs-fix')){\
+                       var s=document.createElement('style'); s.id='wb-fs-fix';\
+                       s.textContent=':fullscreen{position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;}';\
+                       document.head.appendChild(s);\
+                     }"
                 );
             }
         }
