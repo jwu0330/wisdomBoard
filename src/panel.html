@@ -149,23 +149,27 @@
       }
 
       // 調整大小（編輯模式）
-      var resizing = false, rtype = "", rsx = 0, rsy = 0, rsw = 400, rsh = 300;
+      var resizing = false, rtype = "", rsx = 0, rsy = 0, rsw = 400, rsh = 300, rsf = 1;
       ["rr","rb","rc"].forEach(function(id){
         document.getElementById(id).addEventListener("mousedown", function(e){
           if (mode !== "edit" || !win) return;
-          resizing = true; rtype = id;
+          rtype = id;
           rsx = e.screenX; rsy = e.screenY;
+          e.preventDefault();
+          // 取得目前尺寸與 scale factor 後才開始 resize
           win.scaleFactor().then(function(sf){
-            win.innerSize().then(function(s){
+            rsf = sf;
+            return win.innerSize().then(function(s){
               rsw = s.width / sf; rsh = s.height / sf;
+              resizing = true;
             });
           });
-          e.preventDefault();
         });
       });
       document.addEventListener("mousemove", function(e){
         if (!resizing || !win) return;
-        var dx = e.screenX - rsx, dy = e.screenY - rsy;
+        // screenX 是物理像素，除以 scale factor 轉為邏輯像素
+        var dx = (e.screenX - rsx) / rsf, dy = (e.screenY - rsy) / rsf;
         var nw = rsw, nh = rsh;
         if (rtype==="rr"||rtype==="rc") nw = Math.max(100, rsw + dx);
         if (rtype==="rb"||rtype==="rc") nh = Math.max(60, rsh + dy);

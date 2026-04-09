@@ -203,6 +203,10 @@
           'Enter':13,'Space':32,'Backspace':8,
         };
         const vk = KEY_MAP[e.key] || e.keyCode;
+        if (!vk || vk === 229) {
+          hotkeyMsg.textContent = "無法辨識此按鍵，請換一個";
+          return;
+        }
         const keyName = e.key.length === 1 ? e.key.toUpperCase() : e.key;
         parts.push(keyName);
         const displayName = parts.join("+");
@@ -293,14 +297,14 @@
       };
 
       document.getElementById("btn-edit-all").onclick = async () => {
-        try { await invoke("set_mode", { mode: "edit" }); panels.forEach(p => p.mode = "edit"); }
+        try { await invoke("set_mode", { mode: "edit" }); }
         catch (e) { console.warn("[settings] set_mode 失敗:", e); }
-        render();
+        await syncPanels();
       };
       document.getElementById("btn-lock-all").onclick = async () => {
-        try { await invoke("set_mode", { mode: "locked" }); panels.forEach(p => p.mode = "locked"); }
+        try { await invoke("set_mode", { mode: "locked" }); }
         catch (e) { console.warn("[settings] set_mode 失敗:", e); }
-        render();
+        await syncPanels();
       };
       document.getElementById("btn-close-all").onclick = async () => {
         try {
@@ -406,7 +410,7 @@
         const mode = (typeof d === "object" && d.mode) ? d.mode : defaultMode;
         const zoom = (typeof d === "object" && typeof d.zoom === "number") ? d.zoom : 1.0;
         if (label && !panels.find(p => p.label === label)) {
-          panels.push({ label, url, type, mode, editing: false, passthrough: false, zoom });
+          panels.push({ label, url, type, mode, editing: mode === "edit", passthrough: mode === "passthrough", zoom });
         }
         render();
         await getCurrentWindow().show();

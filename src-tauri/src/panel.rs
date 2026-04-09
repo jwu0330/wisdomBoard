@@ -188,15 +188,22 @@ pub fn close_all_panels(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn list_panels(app: AppHandle) -> Vec<serde_json::Value> {
-    app.webview_windows()
+    let windows: Vec<(String, String)> = app.webview_windows()
         .into_iter()
         .filter(|(label, _)| label.starts_with("panel-"))
         .map(|(label, win)| {
             let title = win.title().unwrap_or_default();
-            let state = app.state::<ManagedState>();
-            let (panel_type, url, mode, zoom, screenshot) = state
-                .lock()
-                .ok()
+            (label, title)
+        })
+        .collect();
+
+    // 一次鎖定讀取所有面板資料，確保一致性
+    let state = app.state::<ManagedState>();
+    let guard = state.lock().ok();
+
+    windows.into_iter()
+        .map(|(label, title)| {
+            let (panel_type, url, mode, zoom, screenshot) = guard.as_ref()
                 .and_then(|g| {
                     g.panels.get(&label).map(|p| (
                         if p.panel_type == PanelType::Url { "url" } else { "capture" },
@@ -661,7 +668,10 @@ fn restore_url_panel(app: &AppHandle, config: &PanelConfig, url: &str) -> Result
         .always_on_top(is_edit)
         .skip_taskbar(true)
         .transparent(false)
-        .on_navigation(|_url| true);
+        .on_navigation(|nav_url| {
+            let u = nav_url.as_str();
+            !u.starts_with("about:") && !u.starts_with("chrome:")
+        });
 
     let win = builder.build().map_err(|e| format!("{e}"))?;
     set_square_corners(&win);

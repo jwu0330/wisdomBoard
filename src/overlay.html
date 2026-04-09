@@ -212,6 +212,10 @@
           sz.style.display = "none";
           hint.style.display = "block";
           hint.innerHTML = "拖拉滑鼠框選要擷取的區域<small>按 ESC 取消</small>";
+          // 清除殘留的 URL 輸入和偵測提示
+          document.getElementById("url-input").value = "";
+          document.getElementById("url-row").style.display = "none";
+          document.getElementById("detected-hint").style.display = "none";
         }
 
         // 關閉選擇面板
@@ -271,6 +275,8 @@
             creating = false;
             hint.style.display = "block";
             hint.innerHTML = "建立失敗：" + err + "<small>按 ESC 取消</small>";
+            sel.style.display = "none";
+            sz.style.display = "none";
           });
         }
 
