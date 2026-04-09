@@ -1,5 +1,5 @@
 use crate::state::{ManagedState, PanelConfig, PanelType};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use tauri::{AppHandle, Emitter, Manager};
 use windows::Win32::Foundation::HWND;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -23,6 +23,9 @@ pub fn set_square_corners(win: &tauri::WebviewWindow) {
 }
 
 static PANEL_COUNT: AtomicU32 = AtomicU32::new(0);
+/// debounce：記錄上次 Resized 觸發 auto_save 的時間戳（毫秒）
+static LAST_RESIZE_SAVE: AtomicU64 = AtomicU64::new(0);
+const RESIZE_DEBOUNCE_MS: u64 = 500;
 
 pub fn next_panel_id() -> String {
     let ts = SystemTime::now()
@@ -44,11 +47,18 @@ fn get_scale(app: &AppHandle) -> f64 {
 pub fn handle_panel_event(app: &AppHandle, label: &str, event: &tauri::WindowEvent) {
     match event {
         tauri::WindowEvent::Destroyed => {
-            {
+            let screenshot_path: Option<String> = {
                 let state = app.state::<ManagedState>();
-                if let Ok(mut guard) = state.lock() {
-                    guard.panels.remove(label);
+                let result = if let Ok(mut guard) = state.lock() {
+                    guard.panels.remove(label).and_then(|p| p.screenshot_path)
+                } else {
+                    None
                 };
+                result
+            };
+            // 清理截圖暫存檔
+            if let Some(path) = screenshot_path {
+                let _ = std::fs::remove_file(&path);
             }
             crate::persistence::auto_save(app);
             let _ = app.emit("panel-closed", label);
@@ -72,7 +82,20 @@ pub fn handle_panel_event(app: &AppHandle, label: &str, event: &tauri::WindowEve
                     p.height = size.height as f64 / scale;
                 }
             };
-            crate::persistence::auto_save(app);
+            // debounce：調整大小期間高頻觸發，只在停止調整 500ms 後才寫入
+            let now_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            LAST_RESIZE_SAVE.store(now_ms, Ordering::Relaxed);
+            let app_clone = app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(RESIZE_DEBOUNCE_MS));
+                let saved_at = LAST_RESIZE_SAVE.load(Ordering::Relaxed);
+                if saved_at == now_ms {
+                    crate::persistence::auto_save(&app_clone);
+                }
+            });
         }
         _ => {}
     }
@@ -87,10 +110,15 @@ pub fn close_all_panels(app: AppHandle) -> Result<(), String> {
         .map(|(label, _)| label)
         .collect();
 
-    // 先清空 state，避免 Destroyed handler 重複操作
+    // 先清空 state，清理截圖暫存檔，避免 Destroyed handler 重複操作
     {
         let state = app.state::<ManagedState>();
         if let Ok(mut guard) = state.lock() {
+            for p in guard.panels.values() {
+                if let Some(ref path) = p.screenshot_path {
+                    let _ = std::fs::remove_file(path);
+                }
+            }
             guard.panels.clear();
         };
     }
