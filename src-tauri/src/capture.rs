@@ -352,14 +352,14 @@ fn restore_panels_after_overlay(app: &AppHandle) {
     }
     let locked_labels: Vec<String> = {
         let state = app.state::<crate::state::ManagedState>();
-        let guard = state.lock();
-        match guard {
+        let result = match state.lock() {
             Ok(g) => g.panels.iter()
                 .filter(|(_, cfg)| cfg.mode == "locked")
                 .map(|(l, _)| l.clone())
                 .collect(),
             Err(_) => vec![],
-        }
+        };
+        result
     };
     let app = app.clone();
     std::thread::spawn(move || {
