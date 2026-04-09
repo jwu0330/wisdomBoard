@@ -220,37 +220,76 @@ gh workflow run build.yml
 
 ### 6.1 環境需求
 
-開發本機（僅需編輯程式碼，不需本機編譯）：
-- Git
-- Node.js 24+
-- GitHub CLI (`gh`)
+| 項目 | 版本 | 安裝方式 |
+|------|------|----------|
+| Git | 任意 | https://git-scm.com/download/win |
+| Node.js | 24+ | https://nodejs.org/ |
+| Rust | stable (MSVC) | `winget install Rustlang.Rust.MSVC` |
+| Visual Studio Build Tools | 2022 | 安裝時勾選「使用 C++ 的桌面開發」+ Windows 11 SDK |
+| GitHub CLI | 任意 | `winget install GitHub.cli`（選用，查看 CI 狀態用）|
 
-完整本機編譯（可選）：
-- 以上全部
-- Rust toolchain (stable, MSVC target)
-- Visual Studio 2022 + Windows 11 SDK
-- MSVC Build Tools
+### 6.2 首次設定（Clone & 安裝）
 
-### 6.2 日常開發流程
+```powershell
+# 1. Clone 專案
+git clone git@github.com:jwu0330/wisdomBoard.git
+cd wisdomBoard
 
-```bash
-# 1. 修改程式碼
+# 2. 安裝前端依賴
+npm install
 
-# 2. 提交變更
+# 3. 確認 Rust 工具鏈
+rustup default stable-msvc
+rustup target add x86_64-pc-windows-msvc
+
+# 4. 啟動開發模式（前端 Vite + Rust 後端同時啟動）
+npx tauri dev
+```
+
+### 6.3 日常本地開發流程
+
+```powershell
+# 啟動開發模式（Hot Reload — 前端修改即時生效，Rust 修改自動重編譯）
+npx tauri dev
+
+# 測試完成後提交
 git add <files>
 git commit -m "feat: 新功能描述"
 
-# 3. 推送觸發 CI/CD
+# 推送到 GitHub（自動觸發 CI/CD 建置安裝包）
 git push origin main
+```
 
-# 4. 等待建置完成（約 5-15 分鐘）
+### 6.4 本地正式建置（產生安裝包）
+
+```powershell
+# 完整建置（產生 NSIS + MSI 安裝包）
+npx tauri build
+
+# 產出位置：
+#   src-tauri/target/release/wisdomboard.exe          ← Portable EXE
+#   src-tauri/target/release/bundle/nsis/*.exe         ← NSIS 安裝檔
+#   src-tauri/target/release/bundle/msi/*.msi          ← MSI 安裝檔
+```
+
+### 6.5 CI/CD 建置（GitHub Actions）
+
+推送到 `main` 分支後自動觸發，或在 GitHub 網頁手動觸發：
+
+```powershell
+# 查看 CI/CD 執行狀態
+gh run list --limit 5
+
+# 等待最新建置完成
 gh run watch
 
-# 5. 下載建置產物
-gh run download -n WisdomBoard-Portable
+# 下載建置產物
+gh run download -n WisdomBoard-Portable          # Portable EXE
+gh run download -n WisdomBoard-NSIS-Installer     # NSIS 安裝包
+gh run download -n WisdomBoard-MSI-Installer      # MSI 安裝包
 
-# 6. 測試執行
-./WisdomBoard-Portable/wisdomboard.exe
+# 手動觸發建置（不需推送程式碼）
+gh workflow run build.yml
 ```
 
 ---

@@ -33,6 +33,51 @@ pub fn next_panel_id() -> String {
     format!("panel-{}-{}", ts, seq)
 }
 
+fn get_scale(app: &AppHandle) -> f64 {
+    app.primary_monitor()
+        .ok()
+        .flatten()
+        .map(|m| m.scale_factor())
+        .unwrap_or(1.0)
+}
+
+pub fn handle_panel_event(app: &AppHandle, label: &str, event: &tauri::WindowEvent) {
+    match event {
+        tauri::WindowEvent::Destroyed => {
+            {
+                let state = app.state::<ManagedState>();
+                if let Ok(mut guard) = state.lock() {
+                    guard.panels.remove(label);
+                };
+            }
+            crate::persistence::auto_save(app);
+            let _ = app.emit("panel-closed", label);
+        }
+        tauri::WindowEvent::Moved(pos) => {
+            let scale = get_scale(app);
+            let state = app.state::<ManagedState>();
+            if let Ok(mut guard) = state.lock() {
+                if let Some(p) = guard.panels.get_mut(label) {
+                    p.x = pos.x as f64 / scale;
+                    p.y = pos.y as f64 / scale;
+                }
+            };
+        }
+        tauri::WindowEvent::Resized(size) => {
+            let scale = get_scale(app);
+            let state = app.state::<ManagedState>();
+            if let Ok(mut guard) = state.lock() {
+                if let Some(p) = guard.panels.get_mut(label) {
+                    p.width = size.width as f64 / scale;
+                    p.height = size.height as f64 / scale;
+                }
+            };
+            crate::persistence::auto_save(app);
+        }
+        _ => {}
+    }
+}
+
 /// 關閉所有面板與 overlay，並儲存狀態
 #[tauri::command]
 pub fn close_all_panels(app: AppHandle) -> Result<(), String> {
@@ -70,7 +115,7 @@ pub fn list_panels(app: AppHandle) -> Vec<serde_json::Value> {
         .map(|(label, win)| {
             let title = win.title().unwrap_or_default();
             let state = app.state::<ManagedState>();
-            let (panel_type, url, mode, zoom) = state
+            let (panel_type, url, mode, zoom, screenshot) = state
                 .lock()
                 .ok()
                 .and_then(|g| {
@@ -79,9 +124,10 @@ pub fn list_panels(app: AppHandle) -> Vec<serde_json::Value> {
                         p.url.clone(),
                         p.mode.clone(),
                         p.zoom,
+                        p.screenshot_path.clone(),
                     ))
                 })
-                .unwrap_or(("capture", None, "locked".to_string(), 1.0));
+                .unwrap_or(("capture", None, "locked".to_string(), 1.0, None));
             serde_json::json!({
                 "label": label,
                 "title": title,
@@ -89,6 +135,7 @@ pub fn list_panels(app: AppHandle) -> Vec<serde_json::Value> {
                 "url": url,
                 "mode": mode,
                 "zoom": zoom,
+                "screenshot_path": screenshot,
             })
         })
         .collect()
@@ -102,28 +149,27 @@ pub fn create_url_panel(app: AppHandle, url: String) -> Result<String, String> {
         .parse()
         .map_err(|e: url::ParseError| format!("網址格式錯誤: {e}"))?;
 
-    // 先 insert 預佔 state
     {
         let state = app.state::<ManagedState>();
-        if let Ok(mut guard) = state.lock() {
-            guard.panels.insert(
-                label.clone(),
-                PanelConfig {
-                    label: label.clone(),
-                    panel_type: PanelType::Url,
-                    url: Some(url.clone()),
-                    x: 0.0,
-                    y: 0.0,
-                    width: 800.0,
-                    height: 600.0,
-                    mode: "edit".into(),
-                    zoom: 1.0,
-                    target_hwnd: None,
-                    source_rect: None,
-                    screenshot_path: None,
-                },
-            );
-        };
+        let mut guard = state.lock().map_err(|e| format!("state lock 失敗: {e}"))?;
+        guard.panels.insert(
+            label.clone(),
+            PanelConfig {
+                label: label.clone(),
+                panel_type: PanelType::Url,
+                url: Some(url.clone()),
+                x: 0.0,
+                y: 0.0,
+                width: 800.0,
+                height: 600.0,
+                mode: "edit".into(),
+                zoom: 1.0,
+                target_hwnd: None,
+                source_rect: None,
+                screenshot_path: None,
+            },
+        );
+        drop(guard);
     }
 
     // 在獨立執行緒建立視窗，避免阻塞 command handler
@@ -152,37 +198,7 @@ pub fn create_url_panel(app: AppHandle, url: String) -> Result<String, String> {
                     let app_handle = app.clone();
                     let panel_label = label.clone();
                     win.on_window_event(move |event| {
-                        match event {
-                            tauri::WindowEvent::Destroyed => {
-                                {
-                                    let state = app_handle.state::<ManagedState>();
-                                    if let Ok(mut guard) = state.lock() {
-                                        guard.panels.remove(&panel_label);
-                                    };
-                                }
-                                crate::persistence::auto_save(&app_handle);
-                                let _ = app_handle.emit("panel-closed", &panel_label);
-                            }
-                            tauri::WindowEvent::Moved(pos) => {
-                                let state = app_handle.state::<ManagedState>();
-                                if let Ok(mut guard) = state.lock() {
-                                    if let Some(p) = guard.panels.get_mut(&panel_label) {
-                                        p.x = pos.x as f64;
-                                        p.y = pos.y as f64;
-                                    }
-                                };
-                            }
-                            tauri::WindowEvent::Resized(size) => {
-                                let state = app_handle.state::<ManagedState>();
-                                if let Ok(mut guard) = state.lock() {
-                                    if let Some(p) = guard.panels.get_mut(&panel_label) {
-                                        p.width = size.width as f64;
-                                        p.height = size.height as f64;
-                                    }
-                                };
-                            }
-                            _ => {}
-                        }
+                        handle_panel_event(&app_handle, &panel_label, event);
                     });
                     crate::persistence::auto_save(&app);
                     println!("[WisdomBoard] URL 面板 {} 已建立: {}", label, url);
@@ -219,22 +235,22 @@ pub fn create_url_panel_at(
 
     {
         let state = app.state::<ManagedState>();
-        if let Ok(mut guard) = state.lock() {
-            guard.panels.insert(
-                label.clone(),
-                PanelConfig {
-                    label: label.clone(),
-                    panel_type: PanelType::Url,
-                    url: Some(url.clone()),
-                    x, y, width, height,
-                    mode: "edit".into(),
-                    zoom: 1.0,
-                    target_hwnd: None,
-                    source_rect: None,
-                    screenshot_path: None,
-                },
-            );
-        };
+        let mut guard = state.lock().map_err(|e| format!("state lock 失敗: {e}"))?;
+        guard.panels.insert(
+            label.clone(),
+            PanelConfig {
+                label: label.clone(),
+                panel_type: PanelType::Url,
+                url: Some(url.clone()),
+                x, y, width, height,
+                mode: "edit".into(),
+                zoom: 1.0,
+                target_hwnd: None,
+                source_rect: None,
+                screenshot_path: None,
+            },
+        );
+        drop(guard);
     }
 
     std::thread::spawn({
@@ -263,37 +279,7 @@ pub fn create_url_panel_at(
                     let app_handle = app.clone();
                     let panel_label = label.clone();
                     win.on_window_event(move |event| {
-                        match event {
-                            tauri::WindowEvent::Destroyed => {
-                                {
-                                    let state = app_handle.state::<ManagedState>();
-                                    if let Ok(mut guard) = state.lock() {
-                                        guard.panels.remove(&panel_label);
-                                    };
-                                }
-                                crate::persistence::auto_save(&app_handle);
-                                let _ = app_handle.emit("panel-closed", &panel_label);
-                            }
-                            tauri::WindowEvent::Moved(pos) => {
-                                let state = app_handle.state::<ManagedState>();
-                                if let Ok(mut guard) = state.lock() {
-                                    if let Some(p) = guard.panels.get_mut(&panel_label) {
-                                        p.x = pos.x as f64;
-                                        p.y = pos.y as f64;
-                                    }
-                                };
-                            }
-                            tauri::WindowEvent::Resized(size) => {
-                                let state = app_handle.state::<ManagedState>();
-                                if let Ok(mut guard) = state.lock() {
-                                    if let Some(p) = guard.panels.get_mut(&panel_label) {
-                                        p.width = size.width as f64;
-                                        p.height = size.height as f64;
-                                    }
-                                };
-                            }
-                            _ => {}
-                        }
+                        handle_panel_event(&app_handle, &panel_label, event);
                     });
                     crate::persistence::auto_save(&app);
                     println!("[WisdomBoard] URL 面板 {} 已建立 (框選): {} @ ({},{}) {}x{}",
@@ -308,6 +294,7 @@ pub fn create_url_panel_at(
                     if let Ok(mut guard) = state.lock() {
                         guard.panels.remove(&label);
                     };
+                    let _ = app.emit("panel-create-failed", &label);
                 }
             }
         }
@@ -320,28 +307,27 @@ pub fn create_url_panel_at(
 pub fn create_panel(app: AppHandle) -> Result<String, String> {
     let label = next_panel_id();
 
-    // 先 insert 預佔 state
     {
         let state = app.state::<ManagedState>();
-        if let Ok(mut guard) = state.lock() {
-            guard.panels.insert(
-                label.clone(),
-                PanelConfig {
-                    label: label.clone(),
-                    panel_type: PanelType::Capture,
-                    url: None,
-                    x: 0.0,
-                    y: 0.0,
-                    width: 400.0,
-                    height: 300.0,
-                    mode: "locked".into(),
-                    zoom: 1.0,
-                    target_hwnd: None,
-                    source_rect: None,
-                    screenshot_path: None,
-                },
-            );
-        };
+        let mut guard = state.lock().map_err(|e| format!("state lock 失敗: {e}"))?;
+        guard.panels.insert(
+            label.clone(),
+            PanelConfig {
+                label: label.clone(),
+                panel_type: PanelType::Capture,
+                url: None,
+                x: 0.0,
+                y: 0.0,
+                width: 400.0,
+                height: 300.0,
+                mode: "locked".into(),
+                zoom: 1.0,
+                target_hwnd: None,
+                source_rect: None,
+                screenshot_path: None,
+            },
+        );
+        drop(guard);
     }
 
     std::thread::spawn({
@@ -363,37 +349,7 @@ pub fn create_panel(app: AppHandle) -> Result<String, String> {
                     let app_handle = app.clone();
                     let panel_label = label.clone();
                     win.on_window_event(move |event| {
-                        match event {
-                            tauri::WindowEvent::Destroyed => {
-                                {
-                                    let state = app_handle.state::<ManagedState>();
-                                    if let Ok(mut guard) = state.lock() {
-                                        guard.panels.remove(&panel_label);
-                                    };
-                                }
-                                crate::persistence::auto_save(&app_handle);
-                                let _ = app_handle.emit("panel-closed", &panel_label);
-                            }
-                            tauri::WindowEvent::Moved(pos) => {
-                                let state = app_handle.state::<ManagedState>();
-                                if let Ok(mut guard) = state.lock() {
-                                    if let Some(p) = guard.panels.get_mut(&panel_label) {
-                                        p.x = pos.x as f64;
-                                        p.y = pos.y as f64;
-                                    }
-                                };
-                            }
-                            tauri::WindowEvent::Resized(size) => {
-                                let state = app_handle.state::<ManagedState>();
-                                if let Ok(mut guard) = state.lock() {
-                                    if let Some(p) = guard.panels.get_mut(&panel_label) {
-                                        p.width = size.width as f64;
-                                        p.height = size.height as f64;
-                                    }
-                                };
-                            }
-                            _ => {}
-                        }
+                        handle_panel_event(&app_handle, &panel_label, event);
                     });
                     crate::persistence::auto_save(&app);
                     println!("[WisdomBoard] 面板 {} 已建立", label);
@@ -496,6 +452,9 @@ pub fn set_panel_mode(app: AppHandle, label: String, mode: String) -> Result<(),
 
 #[tauri::command]
 pub fn set_panel_zoom(app: AppHandle, label: String, zoom: f64) -> Result<(), String> {
+    if zoom < 0.1 || zoom > 5.0 {
+        return Err(format!("zoom 值超出範圍: {}", zoom));
+    }
     let window = app
         .get_webview_window(&label)
         .ok_or_else(|| format!("找不到面板: {}", label))?;
@@ -544,10 +503,17 @@ pub fn set_mode(app: AppHandle, mode: String) -> Result<(), String> {
         .into_keys()
         .filter(|l| l.starts_with("panel-"))
         .collect();
+    let mut errors = Vec::new();
     for label in labels {
-        let _ = set_panel_mode(app.clone(), label, mode.clone());
+        if let Err(e) = set_panel_mode(app.clone(), label.clone(), mode.clone()) {
+            errors.push(format!("{}: {}", label, e));
+        }
     }
-    Ok(())
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
 }
 
 /// 從持久化設定恢復面板（啟動時呼叫）
@@ -610,41 +576,13 @@ fn restore_url_panel(app: &AppHandle, config: &PanelConfig, url: &str) -> Result
         };
     }
 
-    let app_handle = app.clone();
-    let panel_label = label.clone();
-    win.on_window_event(move |event| {
-        match event {
-            tauri::WindowEvent::Destroyed => {
-                {
-                    let state = app_handle.state::<ManagedState>();
-                    if let Ok(mut guard) = state.lock() {
-                        guard.panels.remove(&panel_label);
-                    };
-                }
-                crate::persistence::auto_save(&app_handle);
-                let _ = app_handle.emit("panel-closed", &panel_label);
-            }
-            tauri::WindowEvent::Moved(pos) => {
-                let state = app_handle.state::<ManagedState>();
-                if let Ok(mut guard) = state.lock() {
-                    if let Some(p) = guard.panels.get_mut(&panel_label) {
-                        p.x = pos.x as f64;
-                        p.y = pos.y as f64;
-                    }
-                };
-            }
-            tauri::WindowEvent::Resized(size) => {
-                let state = app_handle.state::<ManagedState>();
-                if let Ok(mut guard) = state.lock() {
-                    if let Some(p) = guard.panels.get_mut(&panel_label) {
-                        p.width = size.width as f64;
-                        p.height = size.height as f64;
-                    }
-                };
-            }
-            _ => {}
-        }
-    });
+    {
+        let app_handle = app.clone();
+        let panel_label = label.clone();
+        win.on_window_event(move |event| {
+            handle_panel_event(&app_handle, &panel_label, event);
+        });
+    }
 
     Ok(label)
 }
@@ -676,41 +614,13 @@ fn restore_capture_panel(app: &AppHandle, config: &PanelConfig) -> Result<String
         };
     }
 
-    let app_handle = app.clone();
-    let panel_label = label.clone();
-    win.on_window_event(move |event| {
-        match event {
-            tauri::WindowEvent::Destroyed => {
-                {
-                    let state = app_handle.state::<ManagedState>();
-                    if let Ok(mut guard) = state.lock() {
-                        guard.panels.remove(&panel_label);
-                    };
-                }
-                crate::persistence::auto_save(&app_handle);
-                let _ = app_handle.emit("panel-closed", &panel_label);
-            }
-            tauri::WindowEvent::Moved(pos) => {
-                let state = app_handle.state::<ManagedState>();
-                if let Ok(mut guard) = state.lock() {
-                    if let Some(p) = guard.panels.get_mut(&panel_label) {
-                        p.x = pos.x as f64;
-                        p.y = pos.y as f64;
-                    }
-                };
-            }
-            tauri::WindowEvent::Resized(size) => {
-                let state = app_handle.state::<ManagedState>();
-                if let Ok(mut guard) = state.lock() {
-                    if let Some(p) = guard.panels.get_mut(&panel_label) {
-                        p.width = size.width as f64;
-                        p.height = size.height as f64;
-                    }
-                };
-            }
-            _ => {}
-        }
-    });
+    {
+        let app_handle = app.clone();
+        let panel_label = label.clone();
+        win.on_window_event(move |event| {
+            handle_panel_event(&app_handle, &panel_label, event);
+        });
+    }
 
     Ok(label)
 }

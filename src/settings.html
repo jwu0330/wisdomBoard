@@ -271,16 +271,20 @@
       urlIn.onkeydown = (e) => { if (e.key === "Enter" && urlIn.value.trim()) doCreateUrl(); };
       document.getElementById("url-no").onclick = () => { urlArea.classList.remove("show"); urlIn.value = ""; };
 
+      let creatingUrl = false;
       async function doCreateUrl() {
+        if (creatingUrl) return;
         let url = urlIn.value.trim();
         if (!url) return;
         if (!/^https?:\/\//i.test(url)) url = "https://" + url;
         try { new URL(url); } catch { urlErr.textContent = "網址格式不正確"; urlErr.classList.add("show"); return; }
+        creatingUrl = true;
         try {
           const label = await invoke("create_url_panel", { url });
           panels.push({ label, url, type: "url", mode: "edit", zoom: 1.0 });
           render(); closeDlg();
         } catch (e) { urlErr.textContent = "建立失敗：" + e; urlErr.classList.add("show"); }
+        finally { creatingUrl = false; }
       }
 
       document.getElementById("opt-cap").onclick = async () => {
@@ -288,17 +292,25 @@
         try { await invoke("open_capture_overlay"); } catch (e) { alert("建立失敗：" + e); }
       };
 
-      document.getElementById("btn-edit-all").onclick = async () => { panels.forEach(p => p.mode = "edit"); await invoke("set_mode", { mode: "edit" }); render(); };
-      document.getElementById("btn-lock-all").onclick = async () => { panels.forEach(p => p.mode = "locked"); await invoke("set_mode", { mode: "locked" }); render(); };
+      document.getElementById("btn-edit-all").onclick = async () => {
+        try { await invoke("set_mode", { mode: "edit" }); panels.forEach(p => p.mode = "edit"); }
+        catch (e) { console.warn("[settings] set_mode 失敗:", e); }
+        render();
+      };
+      document.getElementById("btn-lock-all").onclick = async () => {
+        try { await invoke("set_mode", { mode: "locked" }); panels.forEach(p => p.mode = "locked"); }
+        catch (e) { console.warn("[settings] set_mode 失敗:", e); }
+        render();
+      };
       document.getElementById("btn-close-all").onclick = async () => {
         try {
           await invoke("close_all_panels");
+          panels = []; render();
+          window.__TAURI__.window.getCurrentWindow().close();
         } catch (e) {
           console.warn("[settings] close_all_panels 失敗:", e);
+          document.getElementById("st").textContent = "關閉失敗：" + e;
         }
-        panels = []; render();
-        // 設定視窗本身也關掉，回到純 tray 常駐狀態
-        window.__TAURI__.window.getCurrentWindow().close();
       };
 
       function render() {
@@ -375,8 +387,8 @@
         }
       });
 
-      listen("panel-closed", (e) => { panels=panels.filter(p=>p.label!==e.payload); render(); });
-      listen("panel-created", async (e) => {
+      const _unlistenClosed = listen("panel-closed", (e) => { panels=panels.filter(p=>p.label!==e.payload); render(); });
+      const _unlistenCreated = listen("panel-created", async (e) => {
         const d = e.payload;
         const label = typeof d === "string" ? d : d.label;
         const type = (typeof d === "object" && d.type) ? d.type : "capture";
@@ -398,16 +410,16 @@
           for (const p of existing) {
             const found = panels.find(x => x.label === p.label);
             if (found) {
-              found.mode = p.mode || found.mode;
-              found.zoom = p.zoom || found.zoom;
-              found.url = p.url || found.url;
+              found.mode = p.mode ?? found.mode;
+              found.zoom = (typeof p.zoom === "number") ? p.zoom : found.zoom;
+              found.url = p.url ?? found.url;
             } else {
               panels.push({
                 label: p.label,
-                url: p.url || null,
-                type: p.type || "capture",
-                mode: p.mode || "locked",
-                zoom: p.zoom || 1.0
+                url: p.url ?? null,
+                type: p.type ?? "capture",
+                mode: p.mode ?? "locked",
+                zoom: (typeof p.zoom === "number") ? p.zoom : 1.0
               });
             }
           }

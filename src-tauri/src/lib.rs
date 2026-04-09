@@ -118,8 +118,14 @@ pub fn run() {
             }
 
             // 系統匣
+            let hotkey_display = {
+                let state = app.state::<ManagedState>();
+                state.lock()
+                    .map(|g| g.hotkey.display_name.clone())
+                    .unwrap_or_else(|_| "Ctrl+Alt+S".into())
+            };
             let settings_i =
-                MenuItem::with_id(app, "settings", "設定 (Ctrl+Alt+S)", true, None::<&str>)?;
+                MenuItem::with_id(app, "settings", format!("設定 ({})", hotkey_display), true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "離開", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&settings_i, &quit_i])?;
 

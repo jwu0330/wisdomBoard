@@ -40,6 +40,10 @@ pub fn start_listener(app_handle: AppHandle) {
             let mods = HOT_KEY_MODIFIERS(modifiers);
             if RegisterHotKey(HWND(0), HOTKEY_SNIP, mods, vk).is_err() {
                 eprintln!("[WisdomBoard] 註冊快捷鍵失敗");
+                let state = app.state::<ManagedState>();
+                if let Ok(mut guard) = state.lock() {
+                    guard.hotkey_thread_id = None;
+                };
                 return;
             }
             println!("[WisdomBoard] 全域快捷鍵已註冊 (thread {})", thread_id);
@@ -58,7 +62,8 @@ pub fn start_listener(app_handle: AppHandle) {
                     if RegisterHotKey(HWND(0), HOTKEY_SNIP, HOT_KEY_MODIFIERS(new_mods), new_vk)
                         .is_err()
                     {
-                        eprintln!("[WisdomBoard] 重新註冊快捷鍵失敗");
+                        eprintln!("[WisdomBoard] 重新註冊快捷鍵失敗，嘗試恢復舊快捷鍵");
+                        let _ = RegisterHotKey(HWND(0), HOTKEY_SNIP, HOT_KEY_MODIFIERS(modifiers), vk);
                     } else {
                         println!("[WisdomBoard] 快捷鍵已更新");
                     }

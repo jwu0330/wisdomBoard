@@ -26,8 +26,8 @@ pub struct PanelConfig {
     /// 保留：未來 DWM Thumbnail 功能的來源區域 [x, y, w, h]
     #[serde(skip)]
     pub source_rect: Option<[i32; 4]>,
-    /// 擷取面板的截圖 BMP 檔案路徑
-    #[serde(default)]
+    /// 擷取面板的截圖 BMP 檔案路徑（僅執行期暫存，不持久化）
+    #[serde(skip_serializing, default)]
     pub screenshot_path: Option<String>,
 }
 
@@ -55,11 +55,12 @@ pub struct AppConfig {
     pub version: u32,
     pub panels: Vec<PanelConfig>,
     pub hotkey: HotkeyConfig,
-    #[serde(default)]
+    #[serde(default = "default_autostart")]
     pub autostart: bool,
 }
 
 fn default_version() -> u32 { 1 }
+fn default_autostart() -> bool { true }
 
 impl Default for AppConfig {
     fn default() -> Self {

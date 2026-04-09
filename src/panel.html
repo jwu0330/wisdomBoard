@@ -88,18 +88,19 @@
       var imgEl = document.getElementById("img");
       var placeholder = document.getElementById("placeholder");
 
+      var initialized = false;
       function initTauri() {
+        if (initialized) return true;
         if (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke) {
+          initialized = true;
           win = window.__TAURI__.window.getCurrentWindow();
           invoke = window.__TAURI__.core.invoke;
           panelLabel = win ? win.label : "";
-          // 載入截圖
           if (invoke && panelLabel) {
             invoke("get_panel_screenshot", { label: panelLabel }).then(function(path) {
               if (path) loadScreenshot(path);
             }).catch(function(){});
           }
-          // 監聽模式切換事件
           window.__TAURI__.event.listen("mode-changed", function(ev){
             setMode(ev.payload);
           });

@@ -14,87 +14,87 @@ use windows::Win32::UI::WindowsAndMessaging::{
 /// 嘗試從前景視窗取得瀏覽器 URL（透過 UI Automation）
 fn detect_browser_url() -> Option<String> {
     unsafe {
-        use windows::Win32::System::Com::{CoInitializeEx, CoCreateInstance, CLSCTX_ALL, COINIT_MULTITHREADED};
+        use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, CoCreateInstance, CLSCTX_ALL, COINIT_MULTITHREADED};
         use windows::Win32::UI::Accessibility::*;
 
         let fg = GetForegroundWindow();
         if fg.0 == 0 { return None; }
 
-        // 先檢查視窗標題
         let mut title_buf = [0u16; 512];
         let len = GetWindowTextW(fg, &mut title_buf);
         if len == 0 { return None; }
         let title = String::from_utf16_lossy(&title_buf[..len as usize]);
         println!("[WisdomBoard] 前景視窗標題: {}", title);
 
-        // 初始化 COM
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let com_ok = CoInitializeEx(None, COINIT_MULTITHREADED).is_ok();
 
-        // 建立 IUIAutomation
-        let uia: IUIAutomation = match CoCreateInstance(&CUIAutomation, None, CLSCTX_ALL) {
-            Ok(u) => u,
-            Err(e) => { println!("[WisdomBoard] UIAutomation 初始化失敗: {e}"); return None; }
-        };
-
-        let root = match uia.ElementFromHandle(fg) {
-            Ok(el) => el,
-            Err(e) => { println!("[WisdomBoard] ElementFromHandle 失敗: {e}"); return None; }
-        };
-
-        // 用 TrueCondition 搜尋所有子元素，篩選 Edit 控件
-        let true_cond = match uia.CreateTrueCondition() {
-            Ok(c) => c,
-            Err(_) => return None,
-        };
-
-        let elements = match root.FindAll(TreeScope_Descendants, &true_cond) {
-            Ok(els) => els,
-            Err(_) => return None,
-        };
-
-        let count = elements.Length().unwrap_or(0);
-        let mut found_url: Option<String> = None;
-
-        for i in 0..count {
-            let el = match elements.GetElement(i) {
-                Ok(e) => e,
-                Err(_) => continue,
+        let result = (|| -> Option<String> {
+            let uia: IUIAutomation = match CoCreateInstance(&CUIAutomation, None, CLSCTX_ALL) {
+                Ok(u) => u,
+                Err(e) => { println!("[WisdomBoard] UIAutomation 初始化失敗: {e}"); return None; }
             };
 
-            // 只處理 Edit 類型
-            let ct = el.CurrentControlType().unwrap_or_default();
-            if ct != UIA_EditControlTypeId { continue; }
-
-            // 嘗試取得 ValuePattern
-            let pattern: IUIAutomationValuePattern = match el.GetCurrentPatternAs(UIA_ValuePatternId) {
-                Ok(p) => p,
-                Err(_) => continue,
+            let root = match uia.ElementFromHandle(fg) {
+                Ok(el) => el,
+                Err(e) => { println!("[WisdomBoard] ElementFromHandle 失敗: {e}"); return None; }
             };
 
-            let val = match pattern.CurrentValue() {
-                Ok(v) => v.to_string(),
-                Err(_) => continue,
+            let true_cond = match uia.CreateTrueCondition() {
+                Ok(c) => c,
+                Err(_) => return None,
             };
 
-            // 檢查是否像 URL（先嘗試直接解析，再嘗試加 https://）
-            let candidate = if val.starts_with("http://") || val.starts_with("https://") {
-                val.clone()
-            } else if val.contains('.') || val.starts_with("localhost") {
-                format!("https://{}", val)
-            } else {
-                continue;
+            let elements = match root.FindAll(TreeScope_Descendants, &true_cond) {
+                Ok(els) => els,
+                Err(_) => return None,
             };
-            if candidate.parse::<url::Url>().is_ok() {
-                println!("[WisdomBoard] 偵測到 URL: {}", candidate);
-                found_url = Some(candidate);
-                break;
+
+            let count = elements.Length().unwrap_or(0);
+            let mut found_url: Option<String> = None;
+
+            for i in 0..count {
+                let el = match elements.GetElement(i) {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
+
+                let ct = el.CurrentControlType().unwrap_or_default();
+                if ct != UIA_EditControlTypeId { continue; }
+
+                let pattern: IUIAutomationValuePattern = match el.GetCurrentPatternAs(UIA_ValuePatternId) {
+                    Ok(p) => p,
+                    Err(_) => continue,
+                };
+
+                let val = match pattern.CurrentValue() {
+                    Ok(v) => v.to_string(),
+                    Err(_) => continue,
+                };
+
+                let candidate = if val.starts_with("http://") || val.starts_with("https://") {
+                    val.clone()
+                } else if val.contains('.') || val.starts_with("localhost") {
+                    format!("https://{}", val)
+                } else {
+                    continue;
+                };
+                if candidate.parse::<url::Url>().is_ok() {
+                    println!("[WisdomBoard] 偵測到 URL: {}", candidate);
+                    found_url = Some(candidate);
+                    break;
+                }
             }
-        }
 
-        if found_url.is_none() {
-            println!("[WisdomBoard] 未偵測到 URL (檢查了 {} 個元素)", count);
+            if found_url.is_none() {
+                println!("[WisdomBoard] 未偵測到 URL (檢查了 {} 個元素)", count);
+            }
+            found_url
+        })();
+
+        if com_ok {
+            CoUninitialize();
         }
-        found_url
+        result
     }
 }
 
@@ -167,7 +167,7 @@ pub fn capture_screen_to_file() -> Result<String, String> {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis();
-        let path = std::env::temp_dir().join(format!("wisdomboard_screenshot_{}.bmp", ts % 1000000));
+        let path = std::env::temp_dir().join(format!("wisdomboard_screenshot_{}.bmp", ts));
         let file_size = 54 + img_size;
         let mut f = std::fs::File::create(&path).map_err(|e| format!("建立檔案失敗: {e}"))?;
         use std::io::Write;
@@ -256,7 +256,10 @@ pub fn capture_region_to_file(x: i32, y: i32, w: i32, h: i32, label: &str) -> Re
         let _ = DeleteDC(mem_dc);
         ReleaseDC(HWND(0), screen_dc);
 
-        let filename = format!("wisdomboard_panel_{}.bmp", label);
+        let safe_label: String = label.chars()
+            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .collect();
+        let filename = format!("wisdomboard_panel_{}.bmp", safe_label);
         let path = std::env::temp_dir().join(&filename);
         let file_size = 54 + img_size;
         let mut f = std::fs::File::create(&path).map_err(|e| format!("建立檔案失敗: {e}"))?;
@@ -307,14 +310,15 @@ pub fn get_detected_url(app: AppHandle) -> Option<String> {
 pub fn open_capture_overlay(app: AppHandle) -> Result<(), String> {
     if let Some(win) = app.get_webview_window("overlay") {
         let _ = win.close();
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
 
-    // 在隱藏視窗前偵測前景視窗的 URL
     let detected_url = detect_browser_url();
     {
         let state = app.state::<crate::state::ManagedState>();
         if let Ok(mut guard) = state.lock() {
             guard.detected_url = detected_url;
+            guard.screenshot_path = None;
         };
     }
 
@@ -422,11 +426,27 @@ pub fn open_capture_overlay(app: AppHandle) -> Result<(), String> {
                 }
                 Err(e) => {
                     println!("[WisdomBoard] overlay build() FAILED: {e}");
-                    // build 失敗也要恢復視窗
                     for (label, w) in app.webview_windows() {
                         if label != "overlay" && label != "main" {
                             let _ = w.show();
                         }
+                    }
+                    let locked_labels: Vec<String> = {
+                        let state = app.state::<crate::state::ManagedState>();
+                        match state.lock() {
+                            Ok(g) => g.panels.iter()
+                                .filter(|(_, cfg)| cfg.mode == "locked")
+                                .map(|(l, _)| l.clone())
+                                .collect(),
+                            Err(_) => vec![],
+                        }
+                    };
+                    for l in locked_labels {
+                        let a = app.clone();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                            let _ = crate::panel::set_panel_mode(a, l, "locked".into());
+                        });
                     }
                 }
             }
@@ -442,6 +462,9 @@ pub fn capture_region(
     app: AppHandle,
     x: f64, y: f64, width: f64, height: f64,
 ) -> Result<String, String> {
+    if width <= 0.0 || height <= 0.0 {
+        return Err(format!("無效的擷取尺寸: {}x{}", width, height));
+    }
     // 使用主螢幕 scale_factor
     let scale = app.primary_monitor()
         .ok()
@@ -532,23 +555,11 @@ pub fn capture_region(
                     let app_handle = app.clone();
                     let panel_label = label.clone();
                     win.on_window_event(move |event| {
-                        match event {
-                            tauri::WindowEvent::Destroyed => {
-                                cleanup_panel(&app_handle, &panel_label);
-                                let _ = app_handle.emit("panel-closed", &panel_label);
-                            }
-                            tauri::WindowEvent::Moved(pos) => {
-                                update_panel_position(&app_handle, &panel_label, pos.x as f64, pos.y as f64);
-                            }
-                            tauri::WindowEvent::Resized(size) => {
-                                update_panel_size(&app_handle, &panel_label, size.width as f64, size.height as f64);
-                            }
-                            _ => {}
-                        }
+                        crate::panel::handle_panel_event(&app_handle, &panel_label, event);
                     });
                     let _ = app.emit("panel-created",
                         serde_json::json!({
-                            "label": &label, "type": "capture",
+                            "label": &label, "type": "capture", "mode": "locked",
                             "x": logical_x, "y": logical_y,
                             "width": logical_w, "height": logical_h,
                             "screenshot_path": &screenshot_path,
@@ -570,36 +581,6 @@ pub fn capture_region(
     Ok(label)
 }
 
-/// 面板關閉時清理 state
-fn cleanup_panel(app: &AppHandle, label: &str) {
-    let state = app.state::<ManagedState>();
-    if let Ok(mut guard) = state.lock() {
-        guard.panels.remove(label);
-    }
-    crate::persistence::auto_save(app);
-}
-
-fn update_panel_position(app: &AppHandle, label: &str, x: f64, y: f64) {
-    let state = app.state::<ManagedState>();
-    if let Ok(mut guard) = state.lock() {
-        if let Some(panel) = guard.panels.get_mut(label) {
-            panel.x = x;
-            panel.y = y;
-        }
-    };
-    crate::persistence::auto_save(app);
-}
-
-fn update_panel_size(app: &AppHandle, label: &str, width: f64, height: f64) {
-    let state = app.state::<ManagedState>();
-    if let Ok(mut guard) = state.lock() {
-        if let Some(panel) = guard.panels.get_mut(label) {
-            panel.width = width;
-            panel.height = height;
-        }
-    };
-    crate::persistence::auto_save(app);
-}
 
 /// Debug 測試
 #[tauri::command]

@@ -245,9 +245,10 @@
         // 關閉選擇面板
         document.getElementById("ap-close").onclick = resetSelection;
 
-        // 選擇「截圖面板」
+        var creating = false;
         document.getElementById("opt-cap").onclick = function() {
-          if (!selectedRect || !window.__TAURI__) return;
+          if (creating || !selectedRect || !window.__TAURI__) return;
+          creating = true;
           var r = selectedRect;
           ap.style.display = "none";
           window.__TAURI__.core.invoke("capture_region", {
@@ -255,6 +256,7 @@
           }).then(function() {
             window.__TAURI__.window.getCurrentWindow().close();
           }).catch(function(err) {
+            creating = false;
             hint.style.display = "block";
             hint.innerHTML = "擷取失敗：" + err + "<small>按 ESC 取消</small>";
             sel.style.display = "none";
@@ -279,11 +281,13 @@
         };
 
         function doCreateUrl() {
+          if (creating) return;
           var url = document.getElementById("url-input").value.trim();
           if (!url) return;
           if (!/^https?:\/\//i.test(url)) url = "https://" + url;
           try { new URL(url); } catch(e) { hint.style.display = "block"; hint.innerHTML = "網址格式不正確<small>按 ESC 取消</small>"; return; }
           if (!selectedRect || !window.__TAURI__) return;
+          creating = true;
           var r = selectedRect;
           ap.style.display = "none";
 
@@ -292,6 +296,7 @@
           }).then(function() {
             window.__TAURI__.window.getCurrentWindow().close();
           }).catch(function(err) {
+            creating = false;
             hint.style.display = "block";
             hint.innerHTML = "建立失敗：" + err + "<small>按 ESC 取消</small>";
           });
