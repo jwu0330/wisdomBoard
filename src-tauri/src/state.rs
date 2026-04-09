@@ -22,9 +22,11 @@ pub struct PanelConfig {
     pub zoom: f64,
     /// 保留：未來 DWM Thumbnail 功能的目標視窗 HWND
     #[serde(skip)]
+    #[allow(dead_code)]
     pub target_hwnd: Option<isize>,
     /// 保留：未來 DWM Thumbnail 功能的來源區域 [x, y, w, h]
     #[serde(skip)]
+    #[allow(dead_code)]
     pub source_rect: Option<[i32; 4]>,
     /// 擷取面板的截圖 BMP 檔案路徑（僅執行期暫存，不持久化）
     #[serde(skip_serializing, default)]
