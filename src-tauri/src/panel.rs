@@ -78,7 +78,7 @@ pub fn list_panels(app: AppHandle) -> Vec<serde_json::Value> {
                         p.zoom,
                     ))
                 })
-                .unwrap_or(("capture", None, "view".to_string(), 1.0));
+                .unwrap_or(("capture", None, "locked".to_string(), 1.0));
             serde_json::json!({
                 "label": label,
                 "title": title,
@@ -571,7 +571,18 @@ pub fn restore_panels(app: &AppHandle, configs: Vec<PanelConfig>) {
         };
 
         match result {
-            Ok(label) => println!("[WisdomBoard] 已恢復面板: {}", label),
+            Ok(label) => {
+                println!("[WisdomBoard] 已恢復面板: {}", label);
+                // 恢復面板的模式
+                if config.mode == "locked" {
+                    let a = app.clone();
+                    let l = label;
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                        let _ = set_panel_mode(a, l, "locked".into());
+                    });
+                }
+            }
             Err(e) => eprintln!("[WisdomBoard] 恢復面板失敗: {e}"),
         }
     }

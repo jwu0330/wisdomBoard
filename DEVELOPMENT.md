@@ -272,14 +272,12 @@ gh run download -n WisdomBoard-Portable
 6. （未來）可在面板中直接操作目標視窗（輸入轉發）
 ```
 
-### 7.3 四種操作模式
+### 7.3 兩種操作模式
 
 | 模式 | 行為 | 觸發方式 |
 |------|------|----------|
-| **觀看模式**（預設）| 面板可拖拉移動 | 預設狀態 |
-| **操作模式** | 可與面板內容互動 | 設定視窗 pill / 面板工具列 |
-| **調整模式** | 可拖拉調整大小 | 設定視窗 pill / 面板工具列 |
-| **鎖定模式** | 面板固定不動，不可關閉 | 設定視窗 pill / 面板工具列 |
+| **編輯模式** | 面板置頂，可拖拉移動、調整大小 | 設定視窗 pill / 面板工具列 |
+| **鎖定模式** | 面板置底，點擊穿透，不可操作 | 設定視窗 pill / 面板工具列 |
 
 ### 7.4 技術實作
 
@@ -308,7 +306,7 @@ gh run download -n WisdomBoard-Portable
 | autostart 插件載入但未啟用 | 加入 `autostart_manager.enable()` |
 | 版本號不一致 (0.1.0 / 0.2.0) | 統一為 0.2.0 |
 | base64 / urlencoding 依賴未使用 | 移除無用 crate |
-| URL 面板先載入 webpanel.html 再 navigate() | 改用 `WebviewUrl::External` 直接載入 |
+| URL 面板先載入 webpanel.html 再 navigate() | 改用 `WebviewUrl::External` 直接載入，已移除 webpanel.html |
 | 面板找不到時靜默成功 | 改為回傳錯誤 |
 | panel.html toggle 邏輯與 settings 不一致 | setMode 改為直接設定，toggle 只在 click handler |
 | set_mode 廣播到所有視窗 | 改為只對 panel-* 視窗發送 |
