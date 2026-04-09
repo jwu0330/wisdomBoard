@@ -1,16 +1,10 @@
-name: Build Windows App
+name: Build & Release
 
 on:
   push:
     branches:
       - main
   workflow_dispatch:
-    inputs:
-      skip_bundle:
-        description: '快速模式：只產生 EXE，跳過安裝包'
-        required: false
-        default: false
-        type: boolean
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -45,33 +39,61 @@ jobs:
       - name: Install Frontend Dependencies
         run: npm ci
 
-      - name: Build Tauri EXE (快速模式)
-        if: ${{ github.event.inputs.skip_bundle == 'true' }}
-        run: npm run tauri build -- --no-bundle
-
-      - name: Build Tauri App (完整模式 — 含 NSIS/MSI 安裝包)
-        if: ${{ github.event.inputs.skip_bundle != 'true' }}
+      - name: Build Tauri App
         run: npm run tauri build
 
-      # === Portable EXE ===
-      - name: Upload Portable EXE
-        uses: actions/upload-artifact@v4
-        with:
-          name: WisdomBoard-Portable
-          path: src-tauri/target/release/wisdomboard.exe
+      # 取得版本號
+      - name: Get Version
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(grep -o '"version": "[^"]*"' src-tauri/tauri.conf.json | head -1 | cut -d'"' -f4)
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v${VERSION}-${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "name=WisdomBoard v${VERSION}" >> $GITHUB_OUTPUT
 
-      # === NSIS 安裝包 ===
-      - name: Upload NSIS Installer
-        if: ${{ github.event.inputs.skip_bundle != 'true' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: WisdomBoard-NSIS-Installer
-          path: src-tauri/target/release/bundle/nsis/*.exe
+      # 重新命名檔案（加上版本號）
+      - name: Rename Files
+        shell: bash
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          cp src-tauri/target/release/wisdomboard.exe "src-tauri/target/release/WisdomBoard-${VERSION}-Portable.exe"
+          cp src-tauri/target/release/bundle/nsis/*.exe "src-tauri/target/release/WisdomBoard-${VERSION}-Setup.exe" 2>/dev/null || true
+          cp src-tauri/target/release/bundle/msi/*.msi "src-tauri/target/release/WisdomBoard-${VERSION}-Setup.msi" 2>/dev/null || true
 
-      # === MSI 安裝包 ===
-      - name: Upload MSI Installer
-        if: ${{ github.event.inputs.skip_bundle != 'true' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: WisdomBoard-MSI-Installer
-          path: src-tauri/target/release/bundle/msi/*.msi
+      # 刪除舊的 latest Release（如果存在）
+      - name: Delete old latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release delete latest --yes --cleanup-tag 2>$null; exit 0
+        shell: pwsh
+
+      # 建立新的 Release（直接下載單一檔案，不用解壓）
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          gh release create latest \
+            --title "WisdomBoard v${VERSION} (Latest)" \
+            --notes "自動建置 — $(date -u '+%Y-%m-%d %H:%M UTC')
+
+          ## 下載
+          - **WisdomBoard-${VERSION}-Portable.exe** — 免安裝，雙擊直接執行
+          - **WisdomBoard-${VERSION}-Setup.exe** — NSIS 安裝檔
+          - **WisdomBoard-${VERSION}-Setup.msi** — MSI 安裝檔（企業部署）
+
+          ## 更新方式
+          \`\`\`powershell
+          # 關閉舊版 → 下載新版 → 執行
+          taskkill /f /im wisdomboard.exe 2>\$null
+          Invoke-WebRequest -Uri 'https://github.com/jwu0330/wisdomBoard/releases/download/latest/WisdomBoard-${VERSION}-Portable.exe' -OutFile WisdomBoard.exe
+          Start-Process ./WisdomBoard.exe
+          \`\`\`
+          " \
+            --latest \
+            "src-tauri/target/release/WisdomBoard-${VERSION}-Portable.exe" \
+            "src-tauri/target/release/WisdomBoard-${VERSION}-Setup.exe" \
+            "src-tauri/target/release/WisdomBoard-${VERSION}-Setup.msi"
