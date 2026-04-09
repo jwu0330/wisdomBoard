@@ -162,7 +162,7 @@ pub fn create_url_panel(app: AppHandle, url: String) -> Result<String, String> {
                 y: 0.0,
                 width: 800.0,
                 height: 600.0,
-                mode: "edit".into(),
+                mode: "locked".into(),
                 zoom: 1.0,
                 target_hwnd: None,
                 source_rect: None,
@@ -187,14 +187,20 @@ pub fn create_url_panel(app: AppHandle, url: String) -> Result<String, String> {
                 .title(format!("WisdomBoard - {}", url))
                 .inner_size(800.0, 600.0)
                 .decorations(false)
-                .always_on_top(true)
+                .always_on_top(false)
                 .skip_taskbar(true)
                 .transparent(false)
-                .on_navigation(|_url| true);
+                .on_navigation(|nav_url| {
+                    let u = nav_url.as_str();
+                    // 阻止 YouTube 全螢幕等跳轉到不同 origin
+                    !u.starts_with("about:") && !u.starts_with("chrome:")
+                });
 
             match builder.build() {
                 Ok(win) => {
                     set_square_corners(&win);
+                    // 預設 locked 模式（置底 + 穿透）
+                    let _ = set_panel_mode(app.clone(), label.clone(), "locked".into());
                     let app_handle = app.clone();
                     let panel_label = label.clone();
                     win.on_window_event(move |event| {
@@ -203,7 +209,7 @@ pub fn create_url_panel(app: AppHandle, url: String) -> Result<String, String> {
                     crate::persistence::auto_save(&app);
                     println!("[WisdomBoard] URL 面板 {} 已建立: {}", label, url);
                     let _ = app.emit("panel-created", serde_json::json!({
-                        "label": &label, "type": "url", "url": &url, "mode": "edit"
+                        "label": &label, "type": "url", "url": &url, "mode": "locked"
                     }));
                 }
                 Err(e) => {
@@ -243,7 +249,7 @@ pub fn create_url_panel_at(
                 panel_type: PanelType::Url,
                 url: Some(url.clone()),
                 x, y, width, height,
-                mode: "edit".into(),
+                mode: "locked".into(),
                 zoom: 1.0,
                 target_hwnd: None,
                 source_rect: None,
@@ -268,14 +274,18 @@ pub fn create_url_panel_at(
                 .inner_size(width, height)
                 .position(x, y)
                 .decorations(false)
-                .always_on_top(true)
+                .always_on_top(false)
                 .skip_taskbar(true)
                 .transparent(false)
-                .on_navigation(|_url| true);
+                .on_navigation(|nav_url| {
+                    let u = nav_url.as_str();
+                    !u.starts_with("about:") && !u.starts_with("chrome:")
+                });
 
             match builder.build() {
                 Ok(win) => {
                     set_square_corners(&win);
+                    let _ = set_panel_mode(app.clone(), label.clone(), "locked".into());
                     let app_handle = app.clone();
                     let panel_label = label.clone();
                     win.on_window_event(move |event| {
@@ -285,7 +295,7 @@ pub fn create_url_panel_at(
                     println!("[WisdomBoard] URL 面板 {} 已建立 (框選): {} @ ({},{}) {}x{}",
                         label, url, x, y, width, height);
                     let _ = app.emit("panel-created", serde_json::json!({
-                        "label": &label, "type": "url", "url": &url, "mode": "edit"
+                        "label": &label, "type": "url", "url": &url, "mode": "locked"
                     }));
                 }
                 Err(e) => {
@@ -433,10 +443,12 @@ pub fn set_panel_mode(app: AppHandle, label: String, mode: String) -> Result<(),
                 }
             }
             let _ = window.show();
-            // URL 面板：移除 drag overlay 讓使用者可操作網頁
             if is_url {
+                // 移除 drag overlay + 阻止全螢幕
                 let _ = window.eval(
-                    "var d=document.getElementById('wb-drag-overlay'); if(d) d.style.display='none';"
+                    "var d=document.getElementById('wb-drag-overlay'); if(d) d.style.display='none';\
+                     document.documentElement.requestFullscreen = function(){};\
+                     if(document.exitFullscreen) document.exitFullscreen();"
                 );
             }
         }

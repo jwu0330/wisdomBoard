@@ -48,6 +48,10 @@ pub fn start_listener(app_handle: AppHandle) {
             }
             println!("[WisdomBoard] 全域快捷鍵已註冊 (thread {})", thread_id);
 
+            // 追蹤目前成功註冊的快捷鍵，fallback 用
+            let mut current_modifiers = modifiers;
+            let mut current_vk = vk;
+
             let mut msg = MSG::default();
             while GetMessageW(&mut msg, HWND(0), 0, 0).as_bool() {
                 if msg.message == WM_HOTKEY && msg.wParam == WPARAM(HOTKEY_SNIP as usize) {
@@ -62,10 +66,12 @@ pub fn start_listener(app_handle: AppHandle) {
                     if RegisterHotKey(HWND(0), HOTKEY_SNIP, HOT_KEY_MODIFIERS(new_mods), new_vk)
                         .is_err()
                     {
-                        eprintln!("[WisdomBoard] 重新註冊快捷鍵失敗，嘗試恢復舊快捷鍵");
-                        let _ = RegisterHotKey(HWND(0), HOTKEY_SNIP, HOT_KEY_MODIFIERS(modifiers), vk);
+                        eprintln!("[WisdomBoard] 重新註冊快捷鍵失敗，恢復上次成功的快捷鍵");
+                        let _ = RegisterHotKey(HWND(0), HOTKEY_SNIP, HOT_KEY_MODIFIERS(current_modifiers), current_vk);
                     } else {
                         println!("[WisdomBoard] 快捷鍵已更新");
+                        current_modifiers = new_mods;
+                        current_vk = new_vk;
                     }
                 }
             }

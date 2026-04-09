@@ -281,7 +281,7 @@
         creatingUrl = true;
         try {
           const label = await invoke("create_url_panel", { url });
-          panels.push({ label, url, type: "url", mode: "edit", zoom: 1.0 });
+          panels.push({ label, url, type: "url", mode: "locked", editing: false, passthrough: false, zoom: 1.0 });
           render(); closeDlg();
         } catch (e) { urlErr.textContent = "建立失敗：" + e; urlErr.classList.add("show"); }
         finally { creatingUrl = false; }
@@ -404,7 +404,7 @@
         const mode = (typeof d === "object" && d.mode) ? d.mode : defaultMode;
         const zoom = (typeof d === "object" && typeof d.zoom === "number") ? d.zoom : 1.0;
         if (label && !panels.find(p => p.label === label)) {
-          panels.push({ label, url, type, mode, zoom });
+          panels.push({ label, url, type, mode, editing: false, passthrough: false, zoom });
         }
         render();
         await getCurrentWindow().show();
