@@ -4,27 +4,46 @@ use tauri::{AppHandle, Emitter, Manager};
 use windows::Win32::Foundation::HWND;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// 移除 Windows 11 視窗圓角 + 陰影
+/// 移除 Windows 11 視窗圓角 + 陰影 + 邊框
 pub fn set_square_corners(win: &tauri::WebviewWindow) {
     if let Ok(raw) = win.hwnd() {
         let hwnd = HWND(raw.0 as isize);
         unsafe {
             use windows::Win32::Graphics::Dwm::DwmSetWindowAttribute;
-            // 直角
+
+            // 1. 直角
             let preference: u32 = 1; // DWMWCP_DONOTROUND
             let _ = DwmSetWindowAttribute(
                 hwnd,
                 windows::Win32::Graphics::Dwm::DWMWA_WINDOW_CORNER_PREFERENCE,
                 &preference as *const u32 as *const _,
-                std::mem::size_of::<u32>() as u32,
+                4,
             );
-            // 關閉 DWM 陰影（DWMWA_NCRENDERING_POLICY = 2, DWMNCRP_DISABLED = 1）
-            let policy: u32 = 1;
+
+            // 2. 關閉 DWM 非客戶區渲染（消除陰影）
+            let policy: u32 = 1; // DWMNCRP_DISABLED
             let _ = DwmSetWindowAttribute(
                 hwnd,
-                windows::Win32::Graphics::Dwm::DWMWINDOWATTRIBUTE(2),
+                windows::Win32::Graphics::Dwm::DWMWINDOWATTRIBUTE(2), // DWMWA_NCRENDERING_POLICY
                 &policy as *const u32 as *const _,
-                std::mem::size_of::<u32>() as u32,
+                4,
+            );
+
+            // 3. 設定邊框顏色為 DWMWA_BORDER_COLOR = none（-2 = DWMWA_COLOR_NONE）
+            let no_border: u32 = 0xFFFFFFFE; // DWMWA_COLOR_NONE
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                windows::Win32::Graphics::Dwm::DWMWINDOWATTRIBUTE(34), // DWMWA_BORDER_COLOR
+                &no_border as *const u32 as *const _,
+                4,
+            );
+
+            // 4. 關閉標題列顏色（消除任何殘留的邊框色）
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                windows::Win32::Graphics::Dwm::DWMWINDOWATTRIBUTE(35), // DWMWA_CAPTION_COLOR
+                &no_border as *const u32 as *const _,
+                4,
             );
         }
     }
