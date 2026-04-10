@@ -103,6 +103,7 @@
       </div>
     </div>
 
+    <script src="tauri-init.js"></script>
     <script>
       (function() {
         var bg = document.getElementById("bg");
@@ -113,34 +114,27 @@
         var dragging = false, sx = 0, sy = 0;
         var ready = false;
         var selectedRect = null; // 框選結果
+        var invoke = null, win = null;
 
-        // 載入截圖背景（使用 base64，解決 release build asset:// 問題）
-        var waitCount = 0;
-        function waitForTauri() {
-          if (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke) {
-            window.__TAURI__.core.invoke("get_screenshot_base64").then(function(dataUrl) {
-              bg.style.backgroundImage = "url(" + dataUrl + ")";
-              hint.innerHTML = "拖拉滑鼠框選要擷取的區域<small>按 ESC 取消</small>";
-              ready = true;
-            }).catch(function(err) {
-              hint.innerHTML = "截圖取得失敗：" + err + "<small>按 ESC 取消</small>";
-            });
-          } else if (waitCount++ < 50) {
-            setTimeout(waitForTauri, 100);
-          } else {
-            hint.innerHTML = "初始化失敗<small>按 ESC 取消</small>";
-          }
-        }
-
-        waitForTauri();
+        waitForTauri(function(ctx) {
+          invoke = ctx.invoke;
+          win = ctx.win;
+          invoke("get_screenshot_base64").then(function(dataUrl) {
+            bg.style.backgroundImage = "url(" + dataUrl + ")";
+            hint.innerHTML = "拖拉滑鼠框選要擷取的區域<small>按 ESC 取消</small>";
+            ready = true;
+          }).catch(function(err) {
+            hint.innerHTML = "截圖取得失敗：" + err + "<small>按 ESC 取消</small>";
+          });
+        });
 
         // ESC 取消
         document.addEventListener("keydown", function(e) {
           if (e.key === "Escape") {
             if (ap.style.display === "block") {
               resetSelection();
-            } else if (window.__TAURI__) {
-              window.__TAURI__.window.getCurrentWindow().close();
+            } else if (win) {
+              win.close();
             }
           }
         });
@@ -177,14 +171,13 @@
           selectedRect = r;
 
           // 偵測到 URL → 直接建立 URL 面板，不顯示選單
-          if (window.__TAURI__) {
-            window.__TAURI__.core.invoke("get_detected_url").then(function(url) {
+          if (invoke) {
+            invoke("get_detected_url").then(function(url) {
               if (url && selectedRect) {
-                // 自動建立
-                window.__TAURI__.core.invoke("create_url_panel_at", {
+                invoke("create_url_panel_at", {
                   url: url, x: r.x, y: r.y, width: r.w, height: r.h
                 }).then(function() {
-                  window.__TAURI__.window.getCurrentWindow().close();
+                  win.close();
                 }).catch(function(err) {
                   hint.style.display = "block";
                   hint.innerHTML = "建立失敗：" + err + "<small>按 ESC 取消</small>";
@@ -235,14 +228,14 @@
 
         var creating = false;
         document.getElementById("opt-cap").onclick = function() {
-          if (creating || !selectedRect || !window.__TAURI__) return;
+          if (creating || !selectedRect || !invoke) return;
           creating = true;
           var r = selectedRect;
           ap.style.display = "none";
-          window.__TAURI__.core.invoke("capture_region", {
+          invoke("capture_region", {
             x: r.x, y: r.y, width: r.w, height: r.h
           }).then(function() {
-            window.__TAURI__.window.getCurrentWindow().close();
+            win.close();
           }).catch(function(err) {
             creating = false;
             hint.style.display = "block";
@@ -274,15 +267,15 @@
           if (!url) return;
           if (!/^https?:\/\//i.test(url)) url = "https://" + url;
           try { new URL(url); } catch(e) { hint.style.display = "block"; hint.innerHTML = "網址格式不正確<small>按 ESC 取消</small>"; return; }
-          if (!selectedRect || !window.__TAURI__) return;
+          if (!selectedRect || !invoke) return;
           creating = true;
           var r = selectedRect;
           ap.style.display = "none";
 
-          window.__TAURI__.core.invoke("create_url_panel_at", {
+          invoke("create_url_panel_at", {
             url: url, x: r.x, y: r.y, width: r.w, height: r.h
           }).then(function() {
-            window.__TAURI__.window.getCurrentWindow().close();
+            win.close();
           }).catch(function(err) {
             creating = false;
             hint.style.display = "block";

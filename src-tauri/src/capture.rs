@@ -1,4 +1,4 @@
-use crate::state::{ManagedState, PanelConfig, PanelType};
+use crate::state::{ManagedState, ManagedOverlayState, PanelConfig, PanelType};
 use tauri::{AppHandle, Emitter, Manager};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Gdi::{
@@ -232,7 +232,7 @@ pub fn capture_region_to_file(x: i32, y: i32, w: i32, h: i32, label: &str) -> Re
 /// 取得截圖的 base64 data URL（解決 release build asset:// 路徑問題）
 #[tauri::command]
 pub fn get_screenshot_base64(app: AppHandle) -> Result<String, String> {
-    let state = app.state::<crate::state::ManagedState>();
+    let state = app.state::<ManagedOverlayState>();
     let path = state.lock()
         .map_err(|e| format!("{e}"))?
         .screenshot_path
@@ -264,7 +264,7 @@ pub fn get_panel_screenshot_base64(app: AppHandle, label: String) -> Result<Stri
 /// 取得偵測到的瀏覽器 URL（可多次讀取；URL 在下次 open_capture_overlay 時自動清除）
 #[tauri::command]
 pub fn get_detected_url(app: AppHandle) -> Option<String> {
-    let state = app.state::<crate::state::ManagedState>();
+    let state = app.state::<ManagedOverlayState>();
     let guard = state.lock().ok()?;
     guard.detected_url.clone()
 }
@@ -307,8 +307,8 @@ pub fn open_capture_overlay(app: AppHandle) -> Result<(), String> {
 
         // 清理上一次的截圖暫存檔
         {
-            let state = app.state::<crate::state::ManagedState>();
-            if let Ok(mut guard) = state.lock() {
+            let overlay_state = app.state::<ManagedOverlayState>();
+            if let Ok(mut guard) = overlay_state.lock() {
                 if let Some(old_path) = guard.screenshot_path.take() {
                     let _ = std::fs::remove_file(&old_path);
                 }
@@ -325,8 +325,8 @@ pub fn open_capture_overlay(app: AppHandle) -> Result<(), String> {
         let detected_url = detect_browser_url();
         println!("[WisdomBoard] 偵測 URL 結果: {:?}", detected_url);
         {
-            let state = app.state::<crate::state::ManagedState>();
-            if let Ok(mut guard) = state.lock() {
+            let overlay_state = app.state::<ManagedOverlayState>();
+            if let Ok(mut guard) = overlay_state.lock() {
                 guard.detected_url = detected_url;
             };
         }
@@ -360,8 +360,8 @@ pub fn open_capture_overlay(app: AppHandle) -> Result<(), String> {
         };
 
         {
-            let state = app.state::<crate::state::ManagedState>();
-            if let Ok(mut guard) = state.lock() {
+            let overlay_state = app.state::<ManagedOverlayState>();
+            if let Ok(mut guard) = overlay_state.lock() {
                 guard.screenshot_path = Some(screenshot_path.clone());
             };
         }

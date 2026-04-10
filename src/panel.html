@@ -84,6 +84,7 @@
       <button id="btn-x" title="關閉" style="color:#c00;">關閉</button>
     </div>
 
+    <script src="tauri-init.js"></script>
     <script>
     (function(){
       var mode = "locked"; // 預設鎖定
@@ -93,40 +94,25 @@
       var imgEl = document.getElementById("img");
       var placeholder = document.getElementById("placeholder");
 
-      var initialized = false;
-      function initTauri() {
-        if (initialized) return true;
-        if (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke) {
-          initialized = true;
-          win = window.__TAURI__.window.getCurrentWindow();
-          invoke = window.__TAURI__.core.invoke;
-          panelLabel = win ? win.label : "";
-          if (invoke && panelLabel) {
-            invoke("get_panel_screenshot_base64", { label: panelLabel }).then(function(dataUrl) {
-              if (dataUrl) {
-                imgEl.src = dataUrl;
-                imgEl.onload = function() {
-                  imgEl.classList.remove("hidden");
-                  placeholder.classList.add("hidden");
-                };
-              }
-            }).catch(function(){});
-          }
-          window.__TAURI__.event.listen("mode-changed", function(ev){
-            setMode(ev.payload);
-          });
-          return true;
+      waitForTauri(function(ctx) {
+        invoke = ctx.invoke;
+        win = ctx.win;
+        panelLabel = win ? win.label : "";
+        if (panelLabel) {
+          invoke("get_panel_screenshot_base64", { label: panelLabel }).then(function(dataUrl) {
+            if (dataUrl) {
+              imgEl.src = dataUrl;
+              imgEl.onload = function() {
+                imgEl.classList.remove("hidden");
+                placeholder.classList.add("hidden");
+              };
+            }
+          }).catch(function(){});
         }
-        return false;
-      }
-
-      var waitCount = 0;
-      function waitForTauri() {
-        if (!initTauri() && waitCount++ < 50) {
-          setTimeout(waitForTauri, 100);
-        }
-      }
-      waitForTauri();
+        ctx.listen("mode-changed", function(ev){
+          setMode(ev.payload);
+        });
+      });
 
       // 鎖定/解鎖 toggle 按鈕
       document.getElementById("btn-lock").addEventListener("click", function(){

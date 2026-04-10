@@ -65,6 +65,7 @@ pub fn run() {
             Some(vec![]),
         ))
         .manage(Mutex::new(state::AppState::default()) as ManagedState)
+        .manage(Mutex::new(state::OverlayState::default()) as state::ManagedOverlayState)
         .setup(|app| {
             // 隱藏主視窗
             if let Some(main_window) = app.get_webview_window("main") {

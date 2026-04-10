@@ -70,13 +70,9 @@ impl Default for AppConfig {
 pub struct AppState {
     pub panels: HashMap<String, PanelConfig>,
     pub hotkey: HotkeyConfig,
-    /// 快捷鍵監聽執行緒 ID（用於 PostThreadMessage）
+    /// 快捷鍵監聯執行緒 ID（用於 PostThreadMessage）
     pub hotkey_thread_id: Option<u32>,
     pub autostart: bool,
-    /// 框選 overlay 用的截圖路徑（在 overlay 開啟前截好，overlay JS 讀取此值）
-    pub screenshot_path: Option<String>,
-    /// 截圖前偵測到的前景視窗 URL（瀏覽器網址列）
-    pub detected_url: Option<String>,
 }
 
 impl Default for AppState {
@@ -86,11 +82,19 @@ impl Default for AppState {
             hotkey: HotkeyConfig::default(),
             hotkey_thread_id: None,
             autostart: true,
-            screenshot_path: None,
-            detected_url: None,
         }
     }
 }
 
-/// Tauri managed state wrapper
+/// Overlay 暫態資料（截圖路徑 + 偵測到的 URL），獨立鎖以免跟高頻面板事件競爭
+#[derive(Default)]
+pub struct OverlayState {
+    /// 框選 overlay 用的截圖路徑（在 overlay 開啟前截好，overlay JS 讀取此值）
+    pub screenshot_path: Option<String>,
+    /// 截圖前偵測到的前景視窗 URL（瀏覽器網址列）
+    pub detected_url: Option<String>,
+}
+
+/// Tauri managed state wrappers
 pub type ManagedState = Mutex<AppState>;
+pub type ManagedOverlayState = Mutex<OverlayState>;
