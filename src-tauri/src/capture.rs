@@ -335,12 +335,12 @@ pub fn get_panel_screenshot_base64(app: AppHandle, label: String) -> Result<Stri
     Ok(format!("data:image/bmp;base64,{}", b64))
 }
 
-/// 取得截圖前偵測到的瀏覽器 URL
+/// 取得並清除偵測到的瀏覽器 URL（用完即丟）
 #[tauri::command]
 pub fn get_detected_url(app: AppHandle) -> Option<String> {
     let state = app.state::<crate::state::ManagedState>();
-    let guard = state.lock().ok()?;
-    guard.detected_url.clone()
+    let mut guard = state.lock().ok()?;
+    guard.detected_url.take()
 }
 
 /// overlay 關閉或 build 失敗時，恢復所有面板並重新套用 locked 模式
@@ -379,11 +379,10 @@ pub fn open_capture_overlay(app: AppHandle) -> Result<(), String> {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
 
-        // 先清掉舊的偵測 URL
+        // 清理上一次的截圖暫存檔
         {
             let state = app.state::<crate::state::ManagedState>();
             if let Ok(mut guard) = state.lock() {
-                guard.detected_url = None;
                 if let Some(old_path) = guard.screenshot_path.take() {
                     let _ = std::fs::remove_file(&old_path);
                 }
