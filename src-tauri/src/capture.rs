@@ -240,21 +240,6 @@ pub fn capture_region_to_file(x: i32, y: i32, w: i32, h: i32, label: &str) -> Re
     Ok(path_str)
 }
 
-/// 取得截圖的 base64 data URL（解決 release build asset:// 路徑問題）
-#[tauri::command]
-pub fn get_screenshot_base64(app: AppHandle) -> Result<String, String> {
-    let state = app.state::<ManagedOverlayState>();
-    let path = state.lock()
-        .map_err(|e| format!("{e}"))?
-        .screenshot_path
-        .clone()
-        .ok_or_else(|| "尚未有截圖".to_string())?;
-
-    let data = std::fs::read(&path).map_err(|e| format!("讀取截圖失敗: {e}"))?;
-    use base64::Engine;
-    let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
-    Ok(format!("data:image/bmp;base64,{}", b64))
-}
 
 /// 取得面板截圖的 base64 data URL
 #[tauri::command]
@@ -278,6 +263,19 @@ pub fn get_detected_url(app: AppHandle) -> Option<String> {
     let state = app.state::<ManagedOverlayState>();
     let guard = state.lock().ok()?;
     guard.detected_url.clone()
+}
+
+/// 回傳 overlay 視窗的邏輯原點座標（主螢幕 scale 為基準的虛擬桌面座標）
+///
+/// 多螢幕時 overlay 原點不在 (0,0)，前端需要加上此偏移量才能得到正確的虛擬桌面座標。
+#[tauri::command]
+pub fn get_overlay_origin(app: AppHandle) -> (f64, f64) {
+    let state = app.state::<ManagedOverlayState>();
+    if let Ok(guard) = state.lock() {
+        (guard.overlay_origin_x, guard.overlay_origin_y)
+    } else {
+        (0.0, 0.0)
+    }
 }
 
 /// overlay 關閉或 build 失敗時，恢復所有面板並重新套用 locked 模式
@@ -316,16 +314,6 @@ pub fn open_capture_overlay(app: AppHandle) -> Result<(), String> {
             std::thread::sleep(std::time::Duration::from_millis(FRAME_DELAY_MS));
         }
 
-        // 清理上一次的截圖暫存檔
-        {
-            let overlay_state = app.state::<ManagedOverlayState>();
-            if let Ok(mut guard) = overlay_state.lock() {
-                if let Some(old_path) = guard.screenshot_path.take() {
-                    let _ = std::fs::remove_file(&old_path);
-                }
-            };
-        }
-
         // 第一步：先隱藏 settings 視窗，讓瀏覽器變成前景
         if let Some(settings_win) = app.get_webview_window("settings") {
             let _ = settings_win.hide();
@@ -362,24 +350,33 @@ pub fn open_capture_overlay(app: AppHandle) -> Result<(), String> {
         std::thread::sleep(std::time::Duration::from_millis(WINDOW_HIDE_ANIMATION_MS));
 
         // 透明 overlay 模式：不需要全螢幕截圖作為背景，使用者直接透過透明視窗看見螢幕
-        // Overlay 目前只覆蓋主螢幕(Phase 5 再處理跨螢幕 overlay,規格書 §8.7)
+        // 使用虛擬桌面範圍以支援多螢幕（規格書 §8.7 現已實作基本版）
         // 所有 scale 查詢統一走 monitor 模組,不再直接呼叫 primary_monitor()
         let scale = crate::monitor::primary_scale_factor(&app);
 
-        let (screen_w, screen_h) = unsafe {
-            (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN))
-        };
+        // 取虛擬桌面物理邊界，以主螢幕 scale 轉為邏輯座標
+        let (vl, vt, vr, vb) = crate::monitor::virtual_desktop_physical_bounds();
+        let logical_x = vl as f64 / scale;
+        let logical_y = vt as f64 / scale;
+        let logical_w = (vr - vl) as f64 / scale;
+        let logical_h = (vb - vt) as f64 / scale;
 
-        let logical_w = screen_w as f64 / scale;
-        let logical_h = screen_h as f64 / scale;
+        // 儲存 overlay 原點，供前端校正框選座標
+        {
+            let overlay_state = app.state::<ManagedOverlayState>();
+            if let Ok(mut guard) = overlay_state.lock() {
+                guard.overlay_origin_x = logical_x;
+                guard.overlay_origin_y = logical_y;
+            };
+        }
 
-        println!("[WisdomBoard] 建立 overlay 視窗: {}x{} (scale={})", logical_w, logical_h, scale);
+        println!("[WisdomBoard] 建立 overlay 視窗: {}x{} @ ({},{}) scale={}", logical_w, logical_h, logical_x, logical_y, scale);
 
         let url = tauri::WebviewUrl::App("src/overlay.html".into());
         let builder = tauri::WebviewWindowBuilder::new(&app, "overlay", url)
             .title("WisdomBoard - 框選區域 (按 ESC 或關閉視窗取消)")
             .inner_size(logical_w, logical_h)
-            .position(0.0, 0.0)
+            .position(logical_x, logical_y)
             .decorations(false)
             .always_on_top(true)
             .skip_taskbar(true)

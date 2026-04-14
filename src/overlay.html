@@ -110,12 +110,17 @@
         var ready = false;
         var selectedRect = null; // 框選結果
         var invoke = null, win = null;
-        var detectedUrl = null; // 提前快取偵測到的 URL
+        var detectedUrl = null;   // 提前快取偵測到的 URL
+        var originX = 0, originY = 0; // overlay 在虛擬桌面的邏輯原點（多螢幕用）
 
         waitForTauri(function(ctx) {
           invoke = ctx.invoke;
           win = ctx.win;
-          // 提前取出偵測到的 URL，存在 JS 變數供後續使用
+          // 取 overlay 在虛擬桌面的偏移量（單螢幕時為 0,0）
+          invoke("get_overlay_origin").then(function(o) {
+            originX = o[0]; originY = o[1];
+          }).catch(function() {});
+          // 提前取出偵測到的 URL
           invoke("get_detected_url").then(function(url) {
             detectedUrl = url || null;
           }).catch(function() {});
@@ -168,7 +173,9 @@
           // 偵測到 URL → 直接建立 URL 面板，不顯示選單
           if (detectedUrl && invoke) {
             invoke("create_url_panel_at", {
-              url: detectedUrl, x: r.x, y: r.y, width: r.w, height: r.h
+              url: detectedUrl,
+              x: r.x + originX, y: r.y + originY,
+              width: r.w, height: r.h
             }).then(function() {
               win.close();
             }).catch(function(err) {
@@ -220,7 +227,7 @@
           var r = selectedRect;
           ap.style.display = "none";
           invoke("capture_region", {
-            x: r.x, y: r.y, width: r.w, height: r.h
+            x: r.x + originX, y: r.y + originY, width: r.w, height: r.h
           }).then(function() {
             win.close();
           }).catch(function(err) {
@@ -264,7 +271,7 @@
           ap.style.display = "none";
 
           invoke("create_url_panel_at", {
-            url: url, x: r.x, y: r.y, width: r.w, height: r.h
+            url: url, x: r.x + originX, y: r.y + originY, width: r.w, height: r.h
           }).then(function() {
             win.close();
           }).catch(function(err) {

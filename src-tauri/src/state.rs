@@ -103,13 +103,15 @@ impl Default for AppState {
     }
 }
 
-/// Overlay 暫態資料（截圖路徑 + 偵測到的 URL），獨立鎖以免跟高頻面板事件競爭
+/// Overlay 暫態資料（偵測到的 URL + overlay 原點），獨立鎖以免跟高頻面板事件競爭
 #[derive(Default)]
 pub struct OverlayState {
-    /// 框選 overlay 用的截圖路徑（在 overlay 開啟前截好，overlay JS 讀取此值）
-    pub screenshot_path: Option<String>,
     /// 截圖前偵測到的前景視窗 URL（瀏覽器網址列）
     pub detected_url: Option<String>,
+    /// Overlay 視窗左上角的邏輯座標（主螢幕 scale 為基準的虛擬桌面座標）
+    /// 供前端校正框選座標（多螢幕時 overlay 原點不在 (0,0)）
+    pub overlay_origin_x: f64,
+    pub overlay_origin_y: f64,
 }
 
 /// Tauri managed state wrappers
